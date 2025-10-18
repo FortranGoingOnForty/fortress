@@ -44,6 +44,13 @@ program fortress_clean
         call get_file_list(current_dir, current_files, current_is_dir, current_is_exec, current_count)
         call get_file_list(parent_dir, parent_files, parent_is_dir, parent_is_exec, parent_count)
 
+        ! Ensure selected cursor is within valid bounds
+        if (current_count > 0) then
+            selected = max(1, min(selected, current_count))
+        else
+            selected = 1
+        end if
+
         ! Find current dir in parent
         parent_selected = find_in_parent(current_dir, parent_files, parent_count)
 
@@ -63,16 +70,22 @@ program fortress_clean
             call read_arrow_key(key)
             select case(key)
             case('A')  ! Up
-                if (selected > 1) selected = selected - 1
+                if (selected > 1) then
+                    selected = selected - 1
+                end if
             case('B')  ! Down
-                if (selected < current_count) selected = selected + 1
+                if (selected < current_count .and. current_count > 0) then
+                    selected = selected + 1
+                end if
             case('C')  ! Right - enter
                 if (current_is_dir(selected)) then
                     if (trim(current_files(selected)) == "..") then
                         temp_dir = current_dir
                         current_dir = parent_dir
                         parent_dir = get_parent_path(current_dir)
-                        selected = max(1, find_in_parent(temp_dir, current_files, MAX_FILES))
+                        ! Refresh file list before finding position
+                        call get_file_list(current_dir, current_files, current_is_dir, current_is_exec, current_count)
+                        selected = max(1, min(find_in_parent(temp_dir, current_files, current_count), current_count))
                     else if (trim(current_files(selected)) /= ".") then
                         parent_dir = current_dir
                         current_dir = join_path(current_dir, current_files(selected))
@@ -84,7 +97,9 @@ program fortress_clean
                     temp_dir = current_dir
                     current_dir = parent_dir
                     parent_dir = get_parent_path(current_dir)
-                    selected = max(1, find_in_parent(temp_dir, current_files, MAX_FILES))
+                    ! Refresh file list before finding position
+                    call get_file_list(current_dir, current_files, current_is_dir, current_is_exec, current_count)
+                    selected = max(1, min(find_in_parent(temp_dir, current_files, current_count), current_count))
                 end if
             end select
         case(113, 81)  ! 'q' or 'Q'
@@ -111,6 +126,8 @@ program fortress_clean
                 ! Find and select the file
                 call get_file_list(current_dir, current_files, current_is_dir, current_is_exec, current_count)
                 selected = find_file_in_list(temp_dir, current_files, current_count)
+                ! Ensure selected is within bounds
+                selected = max(1, min(selected, max(1, current_count)))
             end if
         end select
     end do
