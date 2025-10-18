@@ -191,6 +191,15 @@ program fortress_clean
             if (in_git_repo) then
                 call git_commit_prompt(current_dir)
             end if
+        case(85, 117)  ! 'U' or 'u' - git unstage (restore --staged)
+            if (in_git_repo .and. .not. current_is_dir(selected)) then
+                if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                    ! Only unstage if file is actually staged
+                    if (current_is_staged(selected)) then
+                        call git_unstage_file(current_dir, current_files(selected))
+                    end if
+                end if
+            end if
         end select
     end do
 
@@ -415,7 +424,7 @@ contains
         ! Footer
         if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // " | " // RESET // &
-                                     DIM // "↑↓:nav →:enter ←:back f:find A:add M:commit c:cd q:quit" // RESET
+                                     DIM // "↑↓:nav →:enter ←:back f:find A:add U:unstage M:commit c:cd q:quit" // RESET
         else
             write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back f:find c:cd q:quit" // RESET
         end if
@@ -659,6 +668,18 @@ contains
 
         ! Note: git status will be refreshed in the next main loop iteration
     end subroutine git_add_file
+
+    subroutine git_unstage_file(dir, filename)
+        character(len=*), intent(in) :: dir, filename
+        character(len=MAX_PATH*2) :: git_cmd
+        integer :: stat
+
+        ! Build git restore --staged command
+        git_cmd = "cd '" // trim(dir) // "' && git restore --staged '" // trim(filename) // "' 2>/dev/null"
+        call execute_command_line(trim(git_cmd), exitstat=stat, wait=.true.)
+
+        ! Note: git status will be refreshed in the next main loop iteration
+    end subroutine git_unstage_file
 
     subroutine git_commit_prompt(dir)
         character(len=*), intent(in) :: dir
