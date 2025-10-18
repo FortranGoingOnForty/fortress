@@ -4,7 +4,7 @@ program fortress_main
     use terminal_input, only: get_key, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_QUIT
     use filesystem_ops, only: list_directory, get_parent_dir, get_current_dir, is_directory, &
                               file_entry, MAX_FILES
-    use ui_panes, only: draw_panes, update_selection
+    use ui_panes_buffered, only: draw_panes_buffered
 
     implicit none
 
@@ -69,7 +69,7 @@ program fortress_main
             needs_full_redraw = .false.
         end if
 
-        call draw_panes(parent_dir, current_dir, selected_index, parent_selected_index)
+        call draw_panes_buffered(parent_dir, current_dir, selected_index, parent_selected_index)
 
         key = get_key()
 

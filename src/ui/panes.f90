@@ -81,103 +81,87 @@ contains
         character(len=*), intent(in) :: dir_path
         logical, intent(in) :: is_dimmed
         type(file_entry), dimension(MAX_FILES) :: files
-        integer :: i, row, j, actual_width
-        character(len=256) :: display_name
+        integer :: i, row, col_pos
+        character(len=256) :: fname
 
         files = list_directory(dir_path)
-
-        ! Ensure width is reasonable
-        actual_width = min(width, 68)  ! Limit to reasonable size
 
         row = start_row
         do i = 1, min(MAX_FILES, height)
             if (len_trim(files(i)%name) == 0) exit
             if (row > start_row + height - 1) exit
 
+            ! Move to position
             call move_cursor(row, start_col)
 
-            ! Format display name
-            display_name = trim(files(i)%name)
+            ! Get filename
+            fname = files(i)%name
 
-            ! Add slash for directories (except . and ..)
+            ! Add slash for directories (not for . and ..)
             if (files(i)%is_dir) then
-                if (trim(display_name) /= "." .and. trim(display_name) /= "..") then
-                    display_name = trim(display_name) // "/"
+                if (trim(fname) /= "." .and. trim(fname) /= "..") then
+                    fname = trim(fname) // "/"
                 end if
             end if
 
             ! Truncate if too long
-            if (len_trim(display_name) > actual_width - 1) then
-                display_name = display_name(1:actual_width-4) // "..."
+            if (len_trim(fname) > width - 2) then
+                fname = fname(1:width-5) // "..."
             end if
 
-            ! Draw the file entry
+            ! Draw the entry with proper colors
             if (i == selected .and. .not. is_dimmed) then
-                ! Active pane selection - highlight bar
-                ! Build the complete line first
+                ! Active selection - highlight whole line
                 if (files(i)%is_dir) then
-                    write(output_unit, '(a)', advance='no') REVERSE // BLUE // trim(display_name)
-                    ! Pad to fill the selection bar
-                    do j = len_trim(display_name) + 1, actual_width - 1
-                        write(output_unit, '(a1)', advance='no') ' '
-                    end do
-                    write(output_unit, '(a)', advance='no') RESET
+                    write(output_unit, '(a)', advance='no') REVERSE // BLUE // trim(fname) // RESET
                 else
-                    write(output_unit, '(a)', advance='no') REVERSE // trim(display_name)
-                    ! Pad to fill the selection bar
-                    do j = len_trim(display_name) + 1, actual_width - 1
-                        write(output_unit, '(a1)', advance='no') ' '
-                    end do
-                    write(output_unit, '(a)', advance='no') RESET
+                    write(output_unit, '(a)', advance='no') REVERSE // trim(fname) // RESET
                 end if
-            else if (i == selected .and. is_dimmed) then
-                ! Dimmed pane selection - subtle highlight
-                if (files(i)%is_dir) then
-                    write(output_unit, '(a)', advance='no') DIM // BLUE // BOLD // &
-                        display_name(1:len_trim(display_name)) // RESET
-                else
-                    write(output_unit, '(a)', advance='no') DIM // BOLD // &
-                        display_name(1:len_trim(display_name)) // RESET
-                end if
-                ! Clear rest of line
-                do j = len_trim(display_name) + 1, actual_width - 1
-                    write(output_unit, '(a)', advance='no') ' '
+                ! Pad the rest of the line
+                do col_pos = len_trim(fname) + 1, min(width - 1, 70)
+                    write(output_unit, '(a)', advance='no') REVERSE // ' ' // RESET
                 end do
             else
-                ! Normal display
+                ! Normal or dimmed entry
                 if (is_dimmed) then
-                    ! Dimmed pane
-                    if (files(i)%is_dir) then
-                        write(output_unit, '(a)', advance='no') DIM // BLUE // &
-                            display_name(1:len_trim(display_name)) // RESET
+                    if (i == selected) then
+                        ! Dimmed selection
+                        if (files(i)%is_dir) then
+                            write(output_unit, '(a)', advance='no') DIM // BOLD // BLUE // trim(fname) // RESET
+                        else
+                            write(output_unit, '(a)', advance='no') DIM // BOLD // trim(fname) // RESET
+                        end if
                     else
-                        write(output_unit, '(a)', advance='no') DIM // &
-                            display_name(1:len_trim(display_name)) // RESET
+                        ! Dimmed normal
+                        if (files(i)%is_dir) then
+                            write(output_unit, '(a)', advance='no') DIM // BLUE // trim(fname) // RESET
+                        else
+                            write(output_unit, '(a)', advance='no') DIM // trim(fname) // RESET
+                        end if
                     end if
                 else
-                    ! Active pane
+                    ! Active pane, normal entry
                     if (files(i)%is_dir) then
-                        write(output_unit, '(a)', advance='no') BLUE // &
-                            display_name(1:len_trim(display_name)) // RESET
+                        write(output_unit, '(a)', advance='no') BLUE // trim(fname) // RESET
                     else
-                        write(output_unit, '(a)', advance='no') &
-                            display_name(1:len_trim(display_name))
+                        write(output_unit, '(a)', advance='no') trim(fname)
                     end if
                 end if
+
                 ! Clear rest of line
-                do j = len_trim(display_name) + 1, actual_width - 1
-                    write(output_unit, '(a)', advance='no') ' '
+                do col_pos = len_trim(fname) + 1, min(width - 1, 70)
+                    write(output_unit, '(a1)', advance='no') ' '
                 end do
             end if
 
             row = row + 1
         end do
 
-        ! Clear any remaining rows in this pane
+        ! Clear any remaining rows
         do while (row <= start_row + height - 1)
             call move_cursor(row, start_col)
-            do j = 1, actual_width - 1
-                write(output_unit, '(a)', advance='no') ' '
+            do col_pos = 1, min(width - 1, 70)
+                write(output_unit, '(a1)', advance='no') ' '
             end do
             row = row + 1
         end do

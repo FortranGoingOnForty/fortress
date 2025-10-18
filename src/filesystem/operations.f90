@@ -22,7 +22,7 @@ contains
         type(file_entry), dimension(MAX_FILES) :: entries
         character(len=MAX_PATH) :: temp_file
         character(len=MAX_PATH) :: line, full_path
-        integer :: unit, ios, count, i
+        integer :: unit, ios, count, i, cmd_stat
 
         ! Initialize entries
         do i = 1, MAX_FILES
@@ -31,11 +31,15 @@ contains
             entries(i)%size = 0
         end do
 
-        ! Create a temporary file to store ls output
-        temp_file = "/tmp/fortress_ls_temp.txt"
+        ! Create a temporary file to store ls output in HOME directory
+        ! This should work even in raw terminal mode
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_ls_temp.txt"
 
-        ! Use ls -1 for simpler parsing
-        call execute_command_line("ls -1a '" // trim(path) // "' > " // trim(temp_file), wait=.true.)
+        ! Use ls -1 for simpler parsing with error checking
+        ! Use explicit sh to ensure it works in raw terminal mode
+        call execute_command_line("sh -c 'ls -1a """ // trim(path) // """ > " // trim(temp_file) // " 2>&1'", &
+                                 exitstat=cmd_stat, wait=.true.)
 
         ! Open and read the temp file
         open(newunit=unit, file=temp_file, status='old', action='read', iostat=ios)
@@ -94,7 +98,7 @@ contains
         is_dir = .false.
 
         ! Use test command to check if it's a directory
-        call execute_command_line("test -d '" // trim(path) // "'", &
+        call execute_command_line("sh -c 'test -d """ // trim(path) // """'", &
                                   exitstat=stat, wait=.true.)
         is_dir = (stat == 0)
     end function is_directory
@@ -105,8 +109,9 @@ contains
         integer :: unit, ios
 
         ! Create a temporary file to store pwd output
-        temp_file = "/tmp/fortress_pwd_temp.txt"
-        call execute_command_line("pwd > " // trim(temp_file), wait=.true.)
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_pwd_temp.txt"
+        call execute_command_line("sh -c 'pwd > " // trim(temp_file) // "'", wait=.true.)
 
         ! Read the current directory
         open(newunit=unit, file=temp_file, status='old', action='read', iostat=ios)
