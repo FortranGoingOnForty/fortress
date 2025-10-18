@@ -19,13 +19,21 @@ module ui_panes
 
 contains
 
-    subroutine draw_panes(parent_dir, current_dir, selected_index)
+    subroutine draw_panes(parent_dir, current_dir, selected_index, parent_selected)
         character(len=*), intent(in) :: parent_dir, current_dir
         integer, intent(in) :: selected_index
+        integer, intent(in), optional :: parent_selected
         integer :: rows, cols
         integer :: left_width, right_width
-        type(file_entry), dimension(MAX_FILES) :: parent_files, current_files
         integer :: i
+        integer :: parent_sel
+
+        ! Handle optional parent selection
+        if (present(parent_selected)) then
+            parent_sel = parent_selected
+        else
+            parent_sel = -1
+        end if
 
         call get_terminal_size(rows, cols)
 
@@ -35,23 +43,32 @@ contains
 
         ! Draw header
         call move_cursor(1, 1)
+        ! Clear the header line first
+        do i = 1, cols
+            write(output_unit, '(a1)', advance='no') ' '
+        end do
+        call move_cursor(1, 1)
         write(output_unit, '(a)', advance='no') BOLD // "FORTRESS" // RESET // &
             " - " // trim(current_dir)
 
-        ! Draw separator line
+        ! Draw vertical separator
         do i = 2, rows - 1
             call move_cursor(i, left_width + 1)
-            write(output_unit, '(a)', advance='no') "│"
+            write(output_unit, '(a)', advance='no') DIM // "│" // RESET
         end do
 
-        ! Draw parent directory pane
-        call draw_file_list(2, 1, left_width, rows - 2, parent_dir, -1)
+        ! Draw parent directory pane (dimmed, with parent selection)
+        call draw_file_list(2, 1, left_width, rows - 2, parent_dir, parent_sel, .true.)
 
-        ! Draw current directory pane
+        ! Draw current directory pane (active)
         call draw_file_list(2, left_width + 2, right_width, rows - 2, &
-                            current_dir, selected_index)
+                            current_dir, selected_index, .false.)
 
         ! Draw footer
+        call move_cursor(rows, 1)
+        do i = 1, cols
+            write(output_unit, '(a1)', advance='no') ' '
+        end do
         call move_cursor(rows, 1)
         write(output_unit, '(a)', advance='no') DIM // &
             "↑↓:navigate  →:enter  ←:back  Ctrl-Q:quit" // RESET
@@ -59,14 +76,18 @@ contains
         flush(output_unit)
     end subroutine draw_panes
 
-    subroutine draw_file_list(start_row, start_col, width, height, dir_path, selected)
+    subroutine draw_file_list(start_row, start_col, width, height, dir_path, selected, is_dimmed)
         integer, intent(in) :: start_row, start_col, width, height, selected
         character(len=*), intent(in) :: dir_path
+        logical, intent(in) :: is_dimmed
         type(file_entry), dimension(MAX_FILES) :: files
-        integer :: i, row
+        integer :: i, row, j, actual_width
         character(len=256) :: display_name
 
         files = list_directory(dir_path)
+
+        ! Ensure width is reasonable
+        actual_width = min(width, 68)  ! Limit to reasonable size
 
         row = start_row
         do i = 1, min(MAX_FILES, height)
@@ -76,26 +97,88 @@ contains
             call move_cursor(row, start_col)
 
             ! Format display name
-            display_name = files(i)%name
-            if (len_trim(display_name) > width - 2) then
-                display_name = display_name(1:width-5) // "..."
-            end if
+            display_name = trim(files(i)%name)
 
-            ! Apply highlighting and colors
-            if (i == selected) then
-                write(output_unit, '(a)', advance='no') REVERSE
-            end if
-
+            ! Add slash for directories (except . and ..)
             if (files(i)%is_dir) then
-                write(output_unit, '(a)', advance='no') BLUE // display_name // "/" // RESET
+                if (trim(display_name) /= "." .and. trim(display_name) /= "..") then
+                    display_name = trim(display_name) // "/"
+                end if
+            end if
+
+            ! Truncate if too long
+            if (len_trim(display_name) > actual_width - 1) then
+                display_name = display_name(1:actual_width-4) // "..."
+            end if
+
+            ! Draw the file entry
+            if (i == selected .and. .not. is_dimmed) then
+                ! Active pane selection - highlight bar
+                ! Build the complete line first
+                if (files(i)%is_dir) then
+                    write(output_unit, '(a)', advance='no') REVERSE // BLUE // trim(display_name)
+                    ! Pad to fill the selection bar
+                    do j = len_trim(display_name) + 1, actual_width - 1
+                        write(output_unit, '(a1)', advance='no') ' '
+                    end do
+                    write(output_unit, '(a)', advance='no') RESET
+                else
+                    write(output_unit, '(a)', advance='no') REVERSE // trim(display_name)
+                    ! Pad to fill the selection bar
+                    do j = len_trim(display_name) + 1, actual_width - 1
+                        write(output_unit, '(a1)', advance='no') ' '
+                    end do
+                    write(output_unit, '(a)', advance='no') RESET
+                end if
+            else if (i == selected .and. is_dimmed) then
+                ! Dimmed pane selection - subtle highlight
+                if (files(i)%is_dir) then
+                    write(output_unit, '(a)', advance='no') DIM // BLUE // BOLD // &
+                        display_name(1:len_trim(display_name)) // RESET
+                else
+                    write(output_unit, '(a)', advance='no') DIM // BOLD // &
+                        display_name(1:len_trim(display_name)) // RESET
+                end if
+                ! Clear rest of line
+                do j = len_trim(display_name) + 1, actual_width - 1
+                    write(output_unit, '(a)', advance='no') ' '
+                end do
             else
-                write(output_unit, '(a)', advance='no') display_name
+                ! Normal display
+                if (is_dimmed) then
+                    ! Dimmed pane
+                    if (files(i)%is_dir) then
+                        write(output_unit, '(a)', advance='no') DIM // BLUE // &
+                            display_name(1:len_trim(display_name)) // RESET
+                    else
+                        write(output_unit, '(a)', advance='no') DIM // &
+                            display_name(1:len_trim(display_name)) // RESET
+                    end if
+                else
+                    ! Active pane
+                    if (files(i)%is_dir) then
+                        write(output_unit, '(a)', advance='no') BLUE // &
+                            display_name(1:len_trim(display_name)) // RESET
+                    else
+                        write(output_unit, '(a)', advance='no') &
+                            display_name(1:len_trim(display_name))
+                    end if
+                end if
+                ! Clear rest of line
+                do j = len_trim(display_name) + 1, actual_width - 1
+                    write(output_unit, '(a)', advance='no') ' '
+                end do
             end if
 
-            if (i == selected) then
-                write(output_unit, '(a)', advance='no') RESET
-            end if
+            row = row + 1
+        end do
 
+        ! Clear any remaining rows in this pane
+        do while (row <= start_row + height - 1)
+            call move_cursor(row, start_col)
+            do j = 1, actual_width - 1
+                write(output_unit, '(a)', advance='no') ' '
+            end do
             row = row + 1
         end do
     end subroutine draw_file_list

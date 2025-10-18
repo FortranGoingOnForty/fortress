@@ -45,16 +45,22 @@ fpm build --flag "-g -Wall -Wextra"
 
 ## Current Features
 
-- ✓ Basic dual-pane display (parent dir | current dir)
-- ✓ Arrow key and vim-style navigation (h,j,k,l)
-- ✓ Basic terminal control with ANSI escape codes
-- ✓ Directory structure visualization
+- ✅ **Dual-pane display** inspired by Ranger/MC (parent dir 30% | current dir 70%)
+- ✅ **Real filesystem navigation** with directory reading
+- ✅ **Smart selection memory** - remembers position when navigating
+- ✅ **Visual hierarchy** - dimmed parent pane, active current pane
+- ✅ **Smooth updates** - no flashing, selective redraws
+- ✅ **Arrow key and vim-style navigation** (h,j,k,l)
+- ✅ **Directory visualization** with color coding (blue with `/` suffix)
+- ✅ **Full-width selection bar** - clean highlighting
+- ✅ **Navigate directories** - enter/exit with arrow keys
 
-## In Progress
+## Next Steps
 
-- [ ] Actual filesystem reading (currently using placeholder data)
-- [ ] File opening with $EDITOR
-- [ ] FZF integration for fuzzy search
+- [ ] File opening with $EDITOR (Enter on files)
+- [ ] FZF integration for fuzzy search (Ctrl-F)
+- [ ] File operations (copy, move, delete)
+- [ ] Configuration file support
 
 ## Roadmap
 
