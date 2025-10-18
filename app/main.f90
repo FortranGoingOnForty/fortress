@@ -35,13 +35,14 @@ program fortress_clean
     logical :: cd_on_exit = .false.
     character(len=MAX_PATH) :: exit_dir
     character(len=256) :: repo_name
+    character(len=256) :: branch_name
     logical :: in_git_repo = .false.
     integer :: i, rows, cols, visible_height
 
     ! Initialize
     current_dir = get_pwd()
     parent_dir = get_parent_path(current_dir)
-    call detect_git_repo(current_dir, in_git_repo, repo_name)
+    call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
 
     ! Setup terminal
     call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
@@ -144,14 +145,14 @@ program fortress_clean
                         parent_dir = get_parent_path(current_dir)
                         selected = -1  ! Signal to find position in parent
                         ! Re-detect git repo after navigation
-                        call detect_git_repo(current_dir, in_git_repo, repo_name)
+                        call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
                     else if (trim(current_files(selected)) /= ".") then
                         parent_dir = current_dir
                         current_dir = join_path(current_dir, current_files(selected))
                         selected = 1
                         scroll_offset = 0
                         ! Re-detect git repo after entering directory
-                        call detect_git_repo(current_dir, in_git_repo, repo_name)
+                        call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
                     end if
                 end if
             case('D')  ! Left - back
@@ -161,7 +162,7 @@ program fortress_clean
                     parent_dir = get_parent_path(current_dir)
                     selected = -1  ! Signal to find position in parent
                     ! Re-detect git repo after going back
-                    call detect_git_repo(current_dir, in_git_repo, repo_name)
+                    call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
                 end if
             end select
         case(113, 81)  ! 'q' or 'Q'
@@ -187,7 +188,7 @@ program fortress_clean
                 parent_dir = get_parent_path(current_dir)
                 selected = -2  ! Signal to find and center on fzf result
                 ! Re-detect git repo after fzf navigation
-                call detect_git_repo(current_dir, in_git_repo, repo_name)
+                call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
             end if
         case(65, 97)  ! 'A' or 'a' - git add
             if (in_git_repo .and. .not. current_is_dir(selected)) then
@@ -431,7 +432,7 @@ contains
 
         ! Footer
         if (in_git_repo) then
-            write(output_unit, '(a)') DIM // trim(repo_name) // " | " // RESET // &
+            write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
                                      DIM // "↑↓:nav →:enter ←:back f:find A:add U:unstage M:commit c:cd q:quit" // RESET
         else
             write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back f:find c:cd q:quit" // RESET
@@ -555,15 +556,16 @@ contains
         idx = 1
     end function find_file_in_list
 
-    subroutine detect_git_repo(dir, is_git, repo)
+    subroutine detect_git_repo(dir, is_git, repo, branch)
         character(len=*), intent(in) :: dir
         logical, intent(out) :: is_git
-        character(len=*), intent(out) :: repo
+        character(len=*), intent(out) :: repo, branch
         integer :: stat
-        character(len=MAX_PATH) :: temp_file, git_dir
+        character(len=MAX_PATH) :: temp_file
 
         is_git = .false.
         repo = ""
+        branch = ""
 
         ! Check if .git directory exists
         call execute_command_line("git -C '" // trim(dir) // "' rev-parse --git-dir > /dev/null 2>&1", &
@@ -579,6 +581,17 @@ contains
             open(newunit=stat, file=temp_file, status='old', iostat=i)
             if (i == 0) then
                 read(stat, '(a)', iostat=i) repo
+                close(stat)
+            end if
+            call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+
+            ! Get current branch name
+            temp_file = trim(temp_file) // "_branch"
+            call execute_command_line("git -C '" // trim(dir) // "' rev-parse --abbrev-ref HEAD 2>/dev/null > " // &
+                                     trim(temp_file), wait=.true.)
+            open(newunit=stat, file=temp_file, status='old', iostat=i)
+            if (i == 0) then
+                read(stat, '(a)', iostat=i) branch
                 close(stat)
             end if
             call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
