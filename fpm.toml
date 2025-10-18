@@ -1,0 +1,26 @@
+name = "fortress"
+version = "0.1.0"
+license = "MIT"
+author = "Matthew Wolffe"
+maintainer = "mfwolffe@outlook.com"
+copyright = "Copyright 2024, FORTRESS contributors"
+description = "A command-line file explorer written in modern Fortran with fzf integration"
+categories = ["file-manager", "terminal", "cli"]
+keywords = ["file-explorer", "fzf", "terminal", "fortran"]
+
+[build]
+auto-executables = true
+auto-tests = true
+link = ["ncurses"]
+
+[install]
+library = false
+
+[[executable]]
+name = "fortress"
+source-dir = "src"
+main = "main.f90"
+
+[dependencies]
+
+[dev-dependencies]
