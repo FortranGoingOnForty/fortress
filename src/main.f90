@@ -1,145 +1,278 @@
-program fortress_main
+program fortress_clean
     use iso_fortran_env, only: output_unit, error_unit
-    use terminal_screen, only: init_screen, cleanup_screen, clear_screen
-    use terminal_input, only: get_key, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_QUIT
-    use filesystem_ops, only: list_directory, get_parent_dir, get_current_dir, is_directory, &
-                              file_entry, MAX_FILES
-    use ui_panes_buffered, only: draw_panes_buffered
-
     implicit none
 
-    logical :: running
-    logical :: needs_full_redraw
-    integer :: key
-    character(len=256) :: current_dir
-    character(len=256) :: parent_dir
-    character(len=256) :: new_dir
-    integer :: selected_index
-    integer :: parent_selected_index
-    type(file_entry), dimension(MAX_FILES) :: current_files, parent_files
-    integer :: file_count, parent_file_count, i
-    character(len=256) :: base_name
+    ! Constants
+    integer, parameter :: MAX_PATH = 512
+    integer, parameter :: MAX_FILES = 500
+    character(len=*), parameter :: ESC = char(27)
+    character(len=*), parameter :: CLEAR = ESC // "[2J" // ESC // "[H"
+    character(len=*), parameter :: BOLD = ESC // "[1m"
+    character(len=*), parameter :: DIM = ESC // "[2m"
+    character(len=*), parameter :: REVERSE = ESC // "[7m"
+    character(len=*), parameter :: RESET = ESC // "[0m"
+
+    ! Variables
+    character(len=MAX_PATH) :: current_dir, parent_dir, temp_dir
+    character(len=MAX_PATH), dimension(MAX_FILES) :: current_files, parent_files
+    logical, dimension(MAX_FILES) :: current_is_dir, parent_is_dir
+    integer :: current_count, parent_count
+    integer :: selected = 1
+    integer :: parent_selected = -1
+    character(len=1) :: key
+    logical :: running = .true.
+    integer :: i, rows, cols
 
     ! Initialize
-    running = .true.
-    needs_full_redraw = .true.
-    selected_index = 1
-    parent_selected_index = 1
-    current_dir = get_current_dir()
-    parent_dir = get_parent_dir(current_dir)
+    current_dir = get_pwd()
+    parent_dir = get_parent_path(current_dir)
 
-    ! Set up terminal
-    call init_screen()
-
-    ! Initial clear screen
-    call clear_screen()
+    ! Setup terminal
+    call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
 
     ! Main loop
     do while (running)
-        ! Get current directory contents
-        current_files = list_directory(current_dir)
-        parent_files = list_directory(parent_dir)
+        ! Get files
+        call get_file_list(current_dir, current_files, current_is_dir, current_count)
+        call get_file_list(parent_dir, parent_files, parent_is_dir, parent_count)
 
-        ! Count actual files
-        file_count = 0
-        do i = 1, MAX_FILES
-            if (len_trim(current_files(i)%name) == 0) exit
-            file_count = i
-        end do
+        ! Find current dir in parent
+        parent_selected = find_in_parent(current_dir, parent_files, parent_count)
 
-        parent_file_count = 0
-        do i = 1, MAX_FILES
-            if (len_trim(parent_files(i)%name) == 0) exit
-            parent_file_count = i
-        end do
+        ! Get terminal size
+        call get_term_size(rows, cols)
 
-        ! Find current directory in parent listing for highlighting
-        call get_basename(current_dir, base_name)
-        parent_selected_index = 1
-        do i = 1, parent_file_count
-            if (trim(parent_files(i)%name) == trim(base_name)) then
-                parent_selected_index = i
-                exit
-            end if
-        end do
+        ! Draw interface
+        write(output_unit, '(a)', advance='no') CLEAR
+        call draw_interface(rows, cols)
 
-        ! Only clear screen if needed (reduces flashing)
-        if (needs_full_redraw) then
-            call clear_screen()
-            needs_full_redraw = .false.
-        end if
+        ! Get input
+        read(*, '(a1)', advance='no') key
 
-        call draw_panes_buffered(parent_dir, current_dir, selected_index, parent_selected_index)
-
-        key = get_key()
-
-        select case(key)
-        case(KEY_UP)
-            if (selected_index > 1) then
-                selected_index = selected_index - 1
-            end if
-        case(KEY_DOWN)
-            if (selected_index < file_count) then
-                selected_index = selected_index + 1
-            end if
-        case(KEY_LEFT)
-            ! Go to parent directory
-            if (trim(current_dir) /= "/") then
-                current_dir = parent_dir
-                parent_dir = get_parent_dir(current_dir)
-                selected_index = parent_selected_index
-                needs_full_redraw = .true.
-            end if
-        case(KEY_RIGHT, KEY_ENTER)
-            ! Enter directory or open file
-            if (selected_index <= file_count) then
-                if (current_files(selected_index)%is_dir) then
-                    ! Navigate into directory
-                    if (trim(current_files(selected_index)%name) == "..") then
-                        ! Same as pressing left arrow
-                        if (trim(current_dir) /= "/") then
-                            current_dir = parent_dir
-                            parent_dir = get_parent_dir(current_dir)
-                            selected_index = parent_selected_index
-                            needs_full_redraw = .true.
-                        end if
-                    else if (trim(current_files(selected_index)%name) /= ".") then
-                        ! Enter subdirectory
-                        new_dir = trim(current_dir) // "/" // trim(current_files(selected_index)%name)
-                        if (is_directory(new_dir)) then
-                            parent_dir = current_dir
-                            current_dir = new_dir
-                            selected_index = 1
-                            needs_full_redraw = .true.
-                        end if
+        ! Handle input
+        select case(ichar(key))
+        case(27)  ! ESC sequence
+            call read_arrow_key(key)
+            select case(key)
+            case('A')  ! Up
+                if (selected > 1) selected = selected - 1
+            case('B')  ! Down
+                if (selected < current_count) selected = selected + 1
+            case('C')  ! Right - enter
+                if (current_is_dir(selected)) then
+                    if (trim(current_files(selected)) == "..") then
+                        temp_dir = current_dir
+                        current_dir = parent_dir
+                        parent_dir = get_parent_path(current_dir)
+                        selected = max(1, find_in_parent(temp_dir, current_files, MAX_FILES))
+                    else if (trim(current_files(selected)) /= ".") then
+                        parent_dir = current_dir
+                        current_dir = join_path(current_dir, current_files(selected))
+                        selected = 1
                     end if
-                else
-                    ! Open file - TODO: implement file opening with $EDITOR
                 end if
-            end if
-        case(KEY_QUIT)
+            case('D')  ! Left - back
+                if (current_dir /= "/") then
+                    temp_dir = current_dir
+                    current_dir = parent_dir
+                    parent_dir = get_parent_path(current_dir)
+                    selected = max(1, find_in_parent(temp_dir, current_files, MAX_FILES))
+                end if
+            end select
+        case(113, 81)  ! 'q' or 'Q'
             running = .false.
         end select
     end do
 
     ! Cleanup
-    call cleanup_screen()
-
-    write(output_unit, *) "Thanks for using FORTRESS!"
+    call execute_command_line("stty icanon echo 2>/dev/null")
+    write(output_unit, '(a)', advance='no') CLEAR
+    write(output_unit, '(a)') "Thanks for using FORTRESS!"
 
 contains
 
-    subroutine get_basename(path, basename)
-        character(len=*), intent(in) :: path
-        character(len=*), intent(out) :: basename
-        integer :: last_slash
+    function get_pwd() result(path)
+        character(len=MAX_PATH) :: path
+        integer :: unit, ios
 
-        last_slash = index(path, '/', back=.true.)
-        if (last_slash > 0 .and. last_slash < len_trim(path)) then
-            basename = path(last_slash+1:)
+        call execute_command_line("pwd > .fortress_pwd 2>/dev/null", wait=.true.)
+        open(newunit=unit, file=".fortress_pwd", status='old', iostat=ios)
+        if (ios == 0) then
+            read(unit, '(a)') path
+            close(unit)
         else
-            basename = path
+            path = "."
         end if
-    end subroutine get_basename
+        call execute_command_line("rm -f .fortress_pwd 2>/dev/null")
+    end function get_pwd
 
-end program fortress_main
+    function get_parent_path(path) result(parent)
+        character(len=*), intent(in) :: path
+        character(len=MAX_PATH) :: parent
+        integer :: pos
+
+        pos = index(path, "/", back=.true.)
+        if (pos > 1) then
+            parent = path(1:pos-1)
+        else if (pos == 1) then
+            parent = "/"
+        else
+            parent = "."
+        end if
+    end function get_parent_path
+
+    function join_path(base, name) result(full)
+        character(len=*), intent(in) :: base, name
+        character(len=MAX_PATH) :: full
+
+        if (base == "/") then
+            full = "/" // trim(name)
+        else
+            full = trim(base) // "/" // trim(name)
+        end if
+    end function join_path
+
+    function find_in_parent(dir, files, count) result(idx)
+        character(len=*), intent(in) :: dir
+        character(len=*), dimension(*), intent(in) :: files
+        integer, intent(in) :: count
+        integer :: idx, pos
+        character(len=256) :: basename
+
+        pos = index(dir, "/", back=.true.)
+        if (pos > 0) then
+            basename = dir(pos+1:)
+        else
+            basename = dir
+        end if
+
+        do idx = 1, count
+            if (trim(files(idx)) == trim(basename)) return
+        end do
+        idx = 1
+    end function find_in_parent
+
+    subroutine get_file_list(dir, files, is_dir, count)
+        character(len=*), intent(in) :: dir
+        character(len=*), dimension(*), intent(out) :: files
+        logical, dimension(*), intent(out) :: is_dir
+        integer, intent(out) :: count
+        integer :: unit, ios, stat
+        character(len=MAX_PATH) :: fullpath
+
+        call execute_command_line("ls -1a '" // trim(dir) // "' > .fortress_ls 2>/dev/null", wait=.true.)
+
+        open(newunit=unit, file=".fortress_ls", status='old', iostat=ios)
+        if (ios /= 0) then
+            count = 0
+            return
+        end if
+
+        count = 0
+        do
+            count = count + 1
+            if (count > MAX_FILES) exit
+            read(unit, '(a)', iostat=ios) files(count)
+            if (ios /= 0) then
+                count = count - 1
+                exit
+            end if
+
+            fullpath = join_path(dir, files(count))
+            call execute_command_line("test -d '" // trim(fullpath) // "'", exitstat=stat, wait=.true.)
+            is_dir(count) = (stat == 0)
+        end do
+
+        close(unit)
+        call execute_command_line("rm -f .fortress_ls 2>/dev/null")
+    end subroutine get_file_list
+
+    subroutine get_term_size(r, c)
+        integer, intent(out) :: r, c
+        integer :: unit, ios
+
+        call execute_command_line("tput lines > .fortress_size 2>/dev/null", wait=.true.)
+        open(newunit=unit, file=".fortress_size", status='old', iostat=ios)
+        if (ios == 0) then
+            read(unit, *) r
+            close(unit)
+        else
+            r = 24
+        end if
+
+        call execute_command_line("tput cols > .fortress_size 2>/dev/null", wait=.true.)
+        open(newunit=unit, file=".fortress_size", status='old', iostat=ios)
+        if (ios == 0) then
+            read(unit, *) c
+            close(unit)
+        else
+            c = 80
+        end if
+
+        call execute_command_line("rm -f .fortress_size 2>/dev/null")
+    end subroutine get_term_size
+
+    subroutine draw_interface(r, c)
+        integer, intent(in) :: r, c
+        integer :: left_w, i
+        character(len=256) :: fname
+
+        left_w = c * 3 / 10
+
+        ! Header
+        write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir)
+
+        ! Files
+        do i = 1, min(r-3, max(parent_count, current_count))
+            ! Parent pane
+            if (i <= parent_count) then
+                fname = parent_files(i)
+                if (parent_is_dir(i) .and. fname /= "." .and. fname /= "..") then
+                    fname = trim(fname) // "/"
+                end if
+                if (i == parent_selected) then
+                    write(output_unit, '(a)', advance='no') DIM // BOLD // fname(1:min(len_trim(fname),left_w)) // RESET
+                else
+                    write(output_unit, '(a)', advance='no') DIM // fname(1:min(len_trim(fname),left_w)) // RESET
+                end if
+                write(output_unit, '(a)', advance='no') repeat(" ", max(0, left_w - len_trim(fname)))
+            else
+                write(output_unit, '(a)', advance='no') repeat(" ", left_w)
+            end if
+
+            ! Separator
+            write(output_unit, '(a)', advance='no') " │ "
+
+            ! Current pane
+            if (i <= current_count) then
+                fname = current_files(i)
+                if (current_is_dir(i) .and. fname /= "." .and. fname /= "..") then
+                    fname = trim(fname) // "/"
+                end if
+                if (i == selected) then
+                    write(output_unit, '(a)') REVERSE // trim(fname) // RESET
+                else
+                    write(output_unit, '(a)') trim(fname)
+                end if
+            else
+                write(output_unit, *)
+            end if
+        end do
+
+        ! Footer
+        write(output_unit, '(a,i0,a)') DIM // "↑↓:nav →:enter ←:back q:quit [", selected, "/" // trim(adjustl(char(current_count))) // "]" // RESET
+    end subroutine draw_interface
+
+    subroutine read_arrow_key(k)
+        character(len=1), intent(out) :: k
+        character(len=1) :: ch
+
+        read(*, '(a1)', advance='no') ch
+        if (ch == '[') then
+            read(*, '(a1)', advance='no') k
+        else
+            k = ch
+        end if
+    end subroutine read_arrow_key
+
+end program fortress_clean
