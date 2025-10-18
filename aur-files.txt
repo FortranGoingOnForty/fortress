@@ -1,0 +1,48 @@
+# AUR Files Ready for Deployment
+
+## Files for AUR Repository
+
+You need to push these 3 files to your AUR repository:
+
+1. **PKGBUILD** - Build instructions
+2. **.SRCINFO** - Package metadata  
+3. **fortress.install** - Post-install script
+
+## Current Status
+
+✅ PKGBUILD - Ready
+✅ .SRCINFO - Generated (update sha256sum before pushing)
+✅ fortress.install - Ready
+
+## To Deploy to AUR
+
+```bash
+# On your AUR server:
+cd /path/to/aur/fortress
+
+# Copy these three files
+cp PKGBUILD .SRCINFO fortress.install .
+
+# Before first push, you MUST:
+# 1. Create GitHub release v0.1.0
+# 2. Update sha256sums in PKGBUILD
+# 3. Regenerate .SRCINFO: makepkg --printsrcinfo > .SRCINFO
+
+# Then commit
+git add PKGBUILD .SRCINFO fortress.install
+git commit -m "Initial import of fortress v0.1.0"
+git push
+```
+
+## Important Notes
+
+- **sha256sums = SKIP**: Change this to actual checksum before pushing
+- **.SRCINFO**: Must be regenerated with `makepkg --printsrcinfo` on Linux after any PKGBUILD changes
+- Both files are ready to copy to your AUR server now
+
+## Three Files You Need
+
+All located in project root:
+- PKGBUILD
+- .SRCINFO
+- fortress.install

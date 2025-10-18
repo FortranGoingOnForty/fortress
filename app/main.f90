@@ -5,6 +5,7 @@ program fortress_clean
     ! Constants
     integer, parameter :: MAX_PATH = 512
     integer, parameter :: MAX_FILES = 500
+    
     character(len=*), parameter :: ESC = char(27)
     character(len=*), parameter :: CLEAR = ESC // "[2J" // ESC // "[H"
     character(len=*), parameter :: BOLD = ESC // "[1m"
@@ -24,11 +25,13 @@ program fortress_clean
     integer :: current_count, parent_count
     integer :: selected = 1
     integer :: parent_selected = -1
+    integer :: scroll_offset = 0
+    integer :: parent_scroll_offset = 0
     character(len=1) :: key
     logical :: running = .true.
     logical :: cd_on_exit = .false.
     character(len=MAX_PATH) :: exit_dir
-    integer :: i, rows, cols
+    integer :: i, rows, cols, visible_height
 
     ! Initialize
     current_dir = get_pwd()
@@ -43,11 +46,51 @@ program fortress_clean
         call get_file_list(current_dir, current_files, current_is_dir, current_is_exec, current_count)
         call get_file_list(parent_dir, parent_files, parent_is_dir, parent_is_exec, parent_count)
 
+        ! Get terminal size early to use for scroll calculations
+        call get_term_size(rows, cols)
+        visible_height = rows - 3  ! Header + footer + 1 for indexing
+
+        ! Handle navigation - find position in parent if needed
+        if (selected == -1) then
+            selected = find_in_parent(temp_dir, current_files, current_count)
+            ! Center the cursor in viewport if possible
+            scroll_offset = max(0, selected - visible_height / 2)
+        else if (selected == -2) then
+            ! Find position after fzf selection
+            selected = find_file_in_list(temp_dir, current_files, current_count)
+            ! Center the cursor in viewport
+            scroll_offset = max(0, selected - visible_height / 2)
+        end if
+
+        ! Ensure selected cursor is within valid bounds
+        if (current_count > 0) then
+            selected = max(1, min(selected, current_count))
+        else
+            selected = 1
+        end if
+
         ! Find current dir in parent
         parent_selected = find_in_parent(current_dir, parent_files, parent_count)
 
-        ! Get terminal size
-        call get_term_size(rows, cols)
+        ! Adjust scroll offset to keep selected item visible
+        if (selected <= scroll_offset) then
+            ! Scrolled above viewport - move viewport up
+            scroll_offset = max(0, selected - 1)
+        else if (selected > scroll_offset + visible_height) then
+            ! Scrolled below viewport - move viewport down
+            scroll_offset = selected - visible_height
+        end if
+        scroll_offset = max(0, min(scroll_offset, max(0, current_count - visible_height)))
+
+        ! Adjust parent scroll offset to keep parent selection visible
+        if (parent_selected > 0) then
+            if (parent_selected <= parent_scroll_offset) then
+                parent_scroll_offset = max(0, parent_selected - 1)
+            else if (parent_selected > parent_scroll_offset + visible_height) then
+                parent_scroll_offset = parent_selected - visible_height
+            end if
+            parent_scroll_offset = max(0, min(parent_scroll_offset, max(0, parent_count - visible_height)))
+        end if
 
         ! Draw interface
         write(output_unit, '(a)', advance='no') CLEAR
@@ -62,20 +105,25 @@ program fortress_clean
             call read_arrow_key(key)
             select case(key)
             case('A')  ! Up
-                if (selected > 1) selected = selected - 1
+                if (selected > 1) then
+                    selected = selected - 1
+                end if
             case('B')  ! Down
-                if (selected < current_count) selected = selected + 1
+                if (selected < current_count .and. current_count > 0) then
+                    selected = selected + 1
+                end if
             case('C')  ! Right - enter
                 if (current_is_dir(selected)) then
                     if (trim(current_files(selected)) == "..") then
                         temp_dir = current_dir
                         current_dir = parent_dir
                         parent_dir = get_parent_path(current_dir)
-                        selected = max(1, find_in_parent(temp_dir, current_files, MAX_FILES))
+                        selected = -1  ! Signal to find position in parent
                     else if (trim(current_files(selected)) /= ".") then
                         parent_dir = current_dir
                         current_dir = join_path(current_dir, current_files(selected))
                         selected = 1
+                        scroll_offset = 0
                     end if
                 end if
             case('D')  ! Left - back
@@ -83,7 +131,7 @@ program fortress_clean
                     temp_dir = current_dir
                     current_dir = parent_dir
                     parent_dir = get_parent_path(current_dir)
-                    selected = max(1, find_in_parent(temp_dir, current_files, MAX_FILES))
+                    selected = -1  ! Signal to find position in parent
                 end if
             end select
         case(113, 81)  ! 'q' or 'Q'
@@ -99,6 +147,15 @@ program fortress_clean
                 end if
                 cd_on_exit = .true.
                 running = .false.
+            end if
+        case(102, 70)  ! 'f' or 'F' - fzf search
+            call fzf_search(current_dir, temp_dir)
+            if (len_trim(temp_dir) > 0) then
+                ! Navigate to the selected file's directory
+                parent_dir = get_parent_path(temp_dir)
+                current_dir = parent_dir
+                parent_dir = get_parent_path(current_dir)
+                selected = -2  ! Signal to find and center on fzf result
             end if
         end select
     end do
@@ -247,28 +304,32 @@ contains
 
     subroutine draw_interface(r, c)
         integer, intent(in) :: r, c
-        integer :: left_w, i
+        integer :: left_w, i, parent_idx, current_idx, vis_h
         character(len=256) :: fname
         character(len=20) :: color_code
 
         left_w = c * 3 / 10
+        vis_h = r - 3  ! Visible height
 
         ! Header
         write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir)
 
-        ! Files
-        do i = 1, min(r-3, max(parent_count, current_count))
+        ! Files (render based on scroll offsets)
+        do i = 1, vis_h
+            parent_idx = i + parent_scroll_offset
+            current_idx = i + scroll_offset
+
             ! Parent pane
-            if (i <= parent_count) then
-                fname = parent_files(i)
-                if (parent_is_dir(i) .and. fname /= "." .and. fname /= "..") then
+            if (parent_idx >= 1 .and. parent_idx <= parent_count) then
+                fname = parent_files(parent_idx)
+                if (parent_is_dir(parent_idx) .and. fname /= "." .and. fname /= "..") then
                     fname = trim(fname) // "/"
                 end if
 
                 ! Get color for parent file
-                color_code = get_file_color(parent_files(i), parent_is_dir(i), parent_is_exec(i))
+                color_code = get_file_color(parent_files(parent_idx), parent_is_dir(parent_idx), parent_is_exec(parent_idx))
 
-                if (i == parent_selected) then
+                if (parent_idx == parent_selected) then
                     write(output_unit, '(a)', advance='no') DIM // BOLD // trim(color_code) // &
                         fname(1:min(len_trim(fname),left_w)) // RESET
                 else
@@ -284,16 +345,16 @@ contains
             write(output_unit, '(a)', advance='no') " │ "
 
             ! Current pane
-            if (i <= current_count) then
-                fname = current_files(i)
-                if (current_is_dir(i) .and. fname /= "." .and. fname /= "..") then
+            if (current_idx >= 1 .and. current_idx <= current_count) then
+                fname = current_files(current_idx)
+                if (current_is_dir(current_idx) .and. fname /= "." .and. fname /= "..") then
                     fname = trim(fname) // "/"
                 end if
 
                 ! Get color for current file
-                color_code = get_file_color(current_files(i), current_is_dir(i), current_is_exec(i))
+                color_code = get_file_color(current_files(current_idx), current_is_dir(current_idx), current_is_exec(current_idx))
 
-                if (i == selected) then
+                if (current_idx == selected) then
                     write(output_unit, '(a)') REVERSE // trim(color_code) // trim(fname) // RESET
                 else
                     write(output_unit, '(a)') trim(color_code) // trim(fname) // RESET
@@ -304,7 +365,7 @@ contains
         end do
 
         ! Footer
-        write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back c:cd q:quit" // RESET
+        write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back f:find c:cd q:quit" // RESET
     end subroutine draw_interface
 
     subroutine read_arrow_key(k)
@@ -354,5 +415,74 @@ contains
             close(unit)
         end if
     end subroutine write_exit_dir
+
+    subroutine fzf_search(search_dir, result_path)
+        character(len=*), intent(in) :: search_dir
+        character(len=*), intent(out) :: result_path
+        character(len=MAX_PATH) :: temp_file, fzf_cmd
+        integer :: unit, ios, stat
+
+        result_path = ""
+
+        ! Create temp file for fzf output
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_fzf"
+
+        ! Restore terminal for fzf
+        call execute_command_line("stty icanon echo 2>/dev/null")
+
+        ! Build fzf command: find files, pipe to fzf, save selection
+        fzf_cmd = "cd '" // trim(search_dir) // "' && " // &
+                  "find . -type f -o -type d | " // &
+                  "sed 's|^\./||' | " // &
+                  "fzf --height=40% --reverse --border --preview 'ls -lh {}' " // &
+                  "> " // trim(temp_file) // " 2>/dev/null"
+
+        ! Run fzf
+        call execute_command_line(trim(fzf_cmd), exitstat=stat, wait=.true.)
+
+        ! Restore raw mode
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+
+        ! Read result if fzf succeeded
+        if (stat == 0) then
+            open(newunit=unit, file=temp_file, status='old', iostat=ios)
+            if (ios == 0) then
+                read(unit, '(a)', iostat=ios) result_path
+                if (ios == 0) then
+                    ! Convert relative path to absolute
+                    result_path = join_path(search_dir, result_path)
+                end if
+                close(unit)
+            end if
+        end if
+
+        ! Cleanup
+        call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+    end subroutine fzf_search
+
+    function find_file_in_list(target_path, files, count) result(idx)
+        character(len=*), intent(in) :: target_path
+        character(len=*), dimension(*), intent(in) :: files
+        integer, intent(in) :: count
+        integer :: idx, pos
+        character(len=MAX_PATH) :: basename
+
+        ! Extract basename from target_path
+        pos = index(target_path, "/", back=.true.)
+        if (pos > 0) then
+            basename = target_path(pos+1:)
+        else
+            basename = target_path
+        end if
+
+        ! Search for the file in the list
+        do idx = 1, count
+            if (trim(files(idx)) == trim(basename)) return
+        end do
+
+        ! Default to first item if not found
+        idx = 1
+    end function find_file_in_list
 
 end program fortress_clean
