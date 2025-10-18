@@ -143,11 +143,15 @@ program fortress_clean
                         current_dir = parent_dir
                         parent_dir = get_parent_path(current_dir)
                         selected = -1  ! Signal to find position in parent
+                        ! Re-detect git repo after navigation
+                        call detect_git_repo(current_dir, in_git_repo, repo_name)
                     else if (trim(current_files(selected)) /= ".") then
                         parent_dir = current_dir
                         current_dir = join_path(current_dir, current_files(selected))
                         selected = 1
                         scroll_offset = 0
+                        ! Re-detect git repo after entering directory
+                        call detect_git_repo(current_dir, in_git_repo, repo_name)
                     end if
                 end if
             case('D')  ! Left - back
@@ -156,6 +160,8 @@ program fortress_clean
                     current_dir = parent_dir
                     parent_dir = get_parent_path(current_dir)
                     selected = -1  ! Signal to find position in parent
+                    ! Re-detect git repo after going back
+                    call detect_git_repo(current_dir, in_git_repo, repo_name)
                 end if
             end select
         case(113, 81)  ! 'q' or 'Q'
@@ -180,6 +186,8 @@ program fortress_clean
                 current_dir = parent_dir
                 parent_dir = get_parent_path(current_dir)
                 selected = -2  ! Signal to find and center on fzf result
+                ! Re-detect git repo after fzf navigation
+                call detect_git_repo(current_dir, in_git_repo, repo_name)
             end if
         case(65, 97)  ! 'A' or 'a' - git add
             if (in_git_repo .and. .not. current_is_dir(selected)) then
