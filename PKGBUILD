@@ -10,7 +10,7 @@ depends=('glibc' 'gcc-libs')
 makedepends=('fpm' 'gcc-fortran')
 install=fortress.install
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
-sha256sums=('SKIP')  # Update with actual checksum when creating release
+sha256sums=('e38b495296e87f7bee7140ed662a37ee23f2f428e459b9c455f846f856014d4e')
 
 build() {
     cd "$srcdir/$pkgname-$pkgver"
