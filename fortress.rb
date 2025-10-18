@@ -8,6 +8,7 @@ class Fortress < Formula
   depends_on "fpm" => :build
   depends_on "gcc" # for gfortran
   depends_on "fzf"
+  depends_on "git"
 
   def install
     # Build the binary
