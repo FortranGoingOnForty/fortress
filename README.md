@@ -2,13 +2,27 @@
 
 A command-line file explorer written in modern Fortran with fzf integration.
 
-## Quick Start
+## Installation
 
-### Prerequisites
+### From AUR (Arch Linux)
+
+```bash
+yay -S fortress
+# or
+paru -S fortress
+```
+
+Shell integration is automatically set up for bash and fish. Zsh users need to add to `~/.zshrc`:
+```bash
+source /usr/share/fortress/fortress.sh
+```
+
+### From Source
+
+#### Prerequisites
 
 - gfortran 10+ or ifort
 - fpm (Fortran Package Manager)
-- fzf (for fuzzy finding features)
 
 ### Install fpm
 
@@ -33,6 +47,20 @@ fpm run
 fpm run --flag "-O2"
 ```
 
+### Shell Integration (Optional)
+
+To enable the "cd on exit" feature (press 'c' to navigate your shell to a directory):
+
+```bash
+# Add to your .bashrc or .zshrc:
+source /path/to/fortress/fortress.sh
+
+# Then use:
+fortress  # instead of 'fpm run'
+```
+
+This allows you to navigate to directories and have your shell follow when you press 'c'.
+
 ### Development
 
 ```bash
@@ -49,11 +77,15 @@ fpm build --flag "-g -Wall -Wextra"
 - ✅ **Real filesystem navigation** with directory reading
 - ✅ **Smart selection memory** - remembers position when navigating
 - ✅ **Visual hierarchy** - dimmed parent pane, active current pane
+- ✅ **Color-coded files**:
+  - Directories: Blue + bold
+  - Executable files: Green
+  - Dotfiles: Grey
+  - Regular files: White
 - ✅ **Smooth updates** - no flashing, selective redraws
-- ✅ **Arrow key and vim-style navigation** (h,j,k,l)
-- ✅ **Directory visualization** with color coding (blue with `/` suffix)
+- ✅ **Arrow key navigation** for intuitive movement
 - ✅ **Full-width selection bar** - clean highlighting
-- ✅ **Navigate directories** - enter/exit with arrow keys
+- ✅ **CD on exit** - press 'c' to navigate your shell to selected directory
 
 ## Next Steps
 
@@ -68,19 +100,25 @@ See [ROADMAP.md](ROADMAP.md) for detailed development plans.
 
 ## Controls
 
-- `↑/↓` or `j/k`: Navigate files
-- `←/→` or `h/l`: Navigate directories
-- `Enter`: Open file/enter directory
-- `q` or `Ctrl-Q`: Quit
+- `↑/↓`: Navigate up/down
+- `→`: Enter directory
+- `←`: Go back to parent directory
+- `c`: CD to selected directory and exit (requires shell integration)
+- `q`: Quit
 
 ## Architecture
 
-FORTRESS is built with modular design:
+FORTRESS is built as a self-contained file explorer:
 
-- `terminal/`: Terminal I/O and screen management
-- `filesystem/`: File operations and directory walking
-- `ui/`: User interface components (panes, rendering)
-- `integration/`: External tool integration (fzf)
+- `app/main.f90`: Main application with integrated UI and file operations
+- `lib_modules/`: Modular components (available for future expansion)
+  - `filesystem/`: File operations and directory walking
+  - `terminal/`: Terminal I/O and screen management
+  - `ui/`: User interface components (panes, rendering)
+
+## Packaging
+
+For AUR maintainers, see [AUR_PACKAGING.md](AUR_PACKAGING.md) for complete packaging instructions.
 
 ## License
 

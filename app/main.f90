@@ -26,6 +26,8 @@ program fortress_clean
     integer :: parent_selected = -1
     character(len=1) :: key
     logical :: running = .true.
+    logical :: cd_on_exit = .false.
+    character(len=MAX_PATH) :: exit_dir
     integer :: i, rows, cols
 
     ! Initialize
@@ -86,13 +88,31 @@ program fortress_clean
             end select
         case(113, 81)  ! 'q' or 'Q'
             running = .false.
+        case(99, 67)  ! 'c' or 'C' - cd to directory on exit
+            if (current_is_dir(selected)) then
+                if (trim(current_files(selected)) == "..") then
+                    exit_dir = parent_dir
+                else if (trim(current_files(selected)) == ".") then
+                    exit_dir = current_dir
+                else
+                    exit_dir = join_path(current_dir, current_files(selected))
+                end if
+                cd_on_exit = .true.
+                running = .false.
+            end if
         end select
     end do
 
     ! Cleanup
     call execute_command_line("stty icanon echo 2>/dev/null")
     write(output_unit, '(a)', advance='no') CLEAR
-    write(output_unit, '(a)') "Thanks for using FORTRESS!"
+
+    ! If cd_on_exit is set, write the directory to a temp file
+    if (cd_on_exit) then
+        call write_exit_dir(exit_dir)
+    else
+        write(output_unit, '(a)') "Thanks for using FORTRESS!"
+    end if
 
 contains
 
@@ -284,7 +304,7 @@ contains
         end do
 
         ! Footer
-        write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back q:quit" // RESET
+        write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back c:cd q:quit" // RESET
     end subroutine draw_interface
 
     subroutine read_arrow_key(k)
@@ -318,5 +338,21 @@ contains
             color = WHITE
         end if
     end function get_file_color
+
+    subroutine write_exit_dir(dir)
+        character(len=*), intent(in) :: dir
+        character(len=MAX_PATH) :: temp_file
+        integer :: unit, ios
+
+        ! Create temp file in HOME directory
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_cd"
+
+        open(newunit=unit, file=temp_file, status='replace', action='write', iostat=ios)
+        if (ios == 0) then
+            write(unit, '(a)') trim(dir)
+            close(unit)
+        end if
+    end subroutine write_exit_dir
 
 end program fortress_clean
