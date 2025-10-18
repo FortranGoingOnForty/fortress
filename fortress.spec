@@ -1,5 +1,5 @@
 Name:           fortress
-Version:        0.5.0
+Version:        0.6.0
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -103,6 +103,10 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.6.0-1
+- Add src/ui/preview.f90 module
+- Code cleanup and documentation improvements
+
 * Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.5.0-1
 - Major refactor: modularize codebase into src/ directory
 - Add branch info to git status bar
