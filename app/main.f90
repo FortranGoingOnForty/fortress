@@ -52,19 +52,22 @@ program fortress_clean
         call get_file_list(current_dir, current_files, current_is_dir, current_is_exec, current_count)
         call get_file_list(parent_dir, parent_files, parent_is_dir, parent_is_exec, parent_count)
 
+        ! Initialize git arrays - only for actual file counts
+        do i = 1, current_count
+            current_is_staged(i) = .false.
+            current_is_unstaged(i) = .false.
+            current_is_untracked(i) = .false.
+        end do
+        do i = 1, parent_count
+            parent_is_staged(i) = .false.
+            parent_is_unstaged(i) = .false.
+            parent_is_untracked(i) = .false.
+        end do
+
         ! Get git status if in a repo
         if (in_git_repo) then
             call get_git_status(current_dir, current_files, current_count, &
                                current_is_staged, current_is_unstaged, current_is_untracked)
-            call get_git_status(parent_dir, parent_files, parent_count, &
-                               parent_is_staged, parent_is_unstaged, parent_is_untracked)
-        else
-            current_is_staged = .false.
-            current_is_unstaged = .false.
-            current_is_untracked = .false.
-            parent_is_staged = .false.
-            parent_is_unstaged = .false.
-            parent_is_untracked = .false.
         end if
 
         ! Get terminal size early to use for scroll calculations
