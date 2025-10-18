@@ -66,6 +66,7 @@ This allows you to navigate to directories and have your shell follow when you p
 - `↑/↓`: Navigate up/down
 - `→`: Enter directory
 - `←`: Go back to parent directory
+- `f`: Fuzzy find files with fzf (searches recursively)
 - `c`: CD to selected directory and exit (requires shell integration)
 - `q`: Quit
 

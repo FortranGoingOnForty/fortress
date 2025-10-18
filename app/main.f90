@@ -101,6 +101,17 @@ program fortress_clean
                 cd_on_exit = .true.
                 running = .false.
             end if
+        case(102, 70)  ! 'f' or 'F' - fzf search
+            call fzf_search(current_dir, temp_dir)
+            if (len_trim(temp_dir) > 0) then
+                ! Navigate to the selected file's directory
+                parent_dir = get_parent_path(temp_dir)
+                current_dir = parent_dir
+                parent_dir = get_parent_path(current_dir)
+                ! Find and select the file
+                call get_file_list(current_dir, current_files, current_is_dir, current_is_exec, current_count)
+                selected = find_file_in_list(temp_dir, current_files, current_count)
+            end if
         end select
     end do
 
@@ -305,7 +316,7 @@ contains
         end do
 
         ! Footer
-        write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back c:cd q:quit" // RESET
+        write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back f:find c:cd q:quit" // RESET
     end subroutine draw_interface
 
     subroutine read_arrow_key(k)
@@ -355,5 +366,74 @@ contains
             close(unit)
         end if
     end subroutine write_exit_dir
+
+    subroutine fzf_search(search_dir, result_path)
+        character(len=*), intent(in) :: search_dir
+        character(len=*), intent(out) :: result_path
+        character(len=MAX_PATH) :: temp_file, fzf_cmd
+        integer :: unit, ios, stat
+
+        result_path = ""
+
+        ! Create temp file for fzf output
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_fzf"
+
+        ! Restore terminal for fzf
+        call execute_command_line("stty icanon echo 2>/dev/null")
+
+        ! Build fzf command: find files, pipe to fzf, save selection
+        fzf_cmd = "cd '" // trim(search_dir) // "' && " // &
+                  "find . -type f -o -type d | " // &
+                  "sed 's|^\./||' | " // &
+                  "fzf --height=40% --reverse --border --preview 'ls -lh {}' " // &
+                  "> " // trim(temp_file) // " 2>/dev/null"
+
+        ! Run fzf
+        call execute_command_line(trim(fzf_cmd), exitstat=stat, wait=.true.)
+
+        ! Restore raw mode
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+
+        ! Read result if fzf succeeded
+        if (stat == 0) then
+            open(newunit=unit, file=temp_file, status='old', iostat=ios)
+            if (ios == 0) then
+                read(unit, '(a)', iostat=ios) result_path
+                if (ios == 0) then
+                    ! Convert relative path to absolute
+                    result_path = join_path(search_dir, result_path)
+                end if
+                close(unit)
+            end if
+        end if
+
+        ! Cleanup
+        call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+    end subroutine fzf_search
+
+    function find_file_in_list(target_path, files, count) result(idx)
+        character(len=*), intent(in) :: target_path
+        character(len=*), dimension(*), intent(in) :: files
+        integer, intent(in) :: count
+        integer :: idx, pos
+        character(len=MAX_PATH) :: basename
+
+        ! Extract basename from target_path
+        pos = index(target_path, "/", back=.true.)
+        if (pos > 0) then
+            basename = target_path(pos+1:)
+        else
+            basename = target_path
+        end if
+
+        ! Search for the file in the list
+        do idx = 1, count
+            if (trim(files(idx)) == trim(basename)) return
+        end do
+
+        ! Default to first item if not found
+        idx = 1
+    end function find_file_in_list
 
 end program fortress_clean
