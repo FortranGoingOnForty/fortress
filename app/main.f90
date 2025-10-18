@@ -14,6 +14,7 @@ program fortress_clean
     character(len=*), parameter :: RESET = ESC // "[0m"
     character(len=*), parameter :: BLUE = ESC // "[34m"
     character(len=*), parameter :: GREEN = ESC // "[32m"
+    character(len=*), parameter :: RED = ESC // "[31m"
     character(len=*), parameter :: GREY = ESC // "[90m"
     character(len=*), parameter :: WHITE = ESC // "[37m"
 
@@ -22,6 +23,8 @@ program fortress_clean
     character(len=MAX_PATH), dimension(MAX_FILES) :: current_files, parent_files
     logical, dimension(MAX_FILES) :: current_is_dir, parent_is_dir
     logical, dimension(MAX_FILES) :: current_is_exec, parent_is_exec
+    logical, dimension(MAX_FILES) :: current_is_staged, current_is_unstaged, current_is_untracked
+    logical, dimension(MAX_FILES) :: parent_is_staged, parent_is_unstaged, parent_is_untracked
     integer :: current_count, parent_count
     integer :: selected = 1
     integer :: parent_selected = -1
@@ -31,11 +34,14 @@ program fortress_clean
     logical :: running = .true.
     logical :: cd_on_exit = .false.
     character(len=MAX_PATH) :: exit_dir
+    character(len=256) :: repo_name
+    logical :: in_git_repo = .false.
     integer :: i, rows, cols, visible_height
 
     ! Initialize
     current_dir = get_pwd()
     parent_dir = get_parent_path(current_dir)
+    call detect_git_repo(current_dir, in_git_repo, repo_name)
 
     ! Setup terminal
     call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
@@ -45,6 +51,21 @@ program fortress_clean
         ! Get files
         call get_file_list(current_dir, current_files, current_is_dir, current_is_exec, current_count)
         call get_file_list(parent_dir, parent_files, parent_is_dir, parent_is_exec, parent_count)
+
+        ! Get git status if in a repo
+        if (in_git_repo) then
+            call get_git_status(current_dir, current_files, current_count, &
+                               current_is_staged, current_is_unstaged, current_is_untracked)
+            call get_git_status(parent_dir, parent_files, parent_count, &
+                               parent_is_staged, parent_is_unstaged, parent_is_untracked)
+        else
+            current_is_staged = .false.
+            current_is_unstaged = .false.
+            current_is_untracked = .false.
+            parent_is_staged = .false.
+            parent_is_unstaged = .false.
+            parent_is_untracked = .false.
+        end if
 
         ! Get terminal size early to use for scroll calculations
         call get_term_size(rows, cols)
@@ -156,6 +177,16 @@ program fortress_clean
                 current_dir = parent_dir
                 parent_dir = get_parent_path(current_dir)
                 selected = -2  ! Signal to find and center on fzf result
+            end if
+        case(65, 97)  ! 'A' or 'a' - git add
+            if (in_git_repo .and. .not. current_is_dir(selected)) then
+                if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                    call git_add_file(current_dir, current_files(selected))
+                end if
+            end if
+        case(77, 109)  ! 'M' or 'm' - git commit
+            if (in_git_repo) then
+                call git_commit_prompt(current_dir)
             end if
         end select
     end do
@@ -355,9 +386,23 @@ contains
                 color_code = get_file_color(current_files(current_idx), current_is_dir(current_idx), current_is_exec(current_idx))
 
                 if (current_idx == selected) then
-                    write(output_unit, '(a)') REVERSE // trim(color_code) // trim(fname) // RESET
+                    write(output_unit, '(a)', advance='no') REVERSE // trim(color_code) // trim(fname)
+                    ! Add git indicators if in repo
+                    if (in_git_repo) then
+                        call write_git_indicators(current_is_staged(current_idx), &
+                                                  current_is_unstaged(current_idx), &
+                                                  current_is_untracked(current_idx), .true.)
+                    end if
+                    write(output_unit, '(a)') RESET
                 else
-                    write(output_unit, '(a)') trim(color_code) // trim(fname) // RESET
+                    write(output_unit, '(a)', advance='no') trim(color_code) // trim(fname)
+                    ! Add git indicators if in repo
+                    if (in_git_repo) then
+                        call write_git_indicators(current_is_staged(current_idx), &
+                                                  current_is_unstaged(current_idx), &
+                                                  current_is_untracked(current_idx), .false.)
+                    end if
+                    write(output_unit, '(a)') RESET
                 end if
             else
                 write(output_unit, *)
@@ -365,7 +410,12 @@ contains
         end do
 
         ! Footer
-        write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back f:find c:cd q:quit" // RESET
+        if (in_git_repo) then
+            write(output_unit, '(a)') DIM // trim(repo_name) // " | " // RESET // &
+                                     DIM // "↑↓:nav →:enter ←:back f:find A:add M:commit c:cd q:quit" // RESET
+        else
+            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back f:find c:cd q:quit" // RESET
+        end if
     end subroutine draw_interface
 
     subroutine read_arrow_key(k)
@@ -484,5 +534,168 @@ contains
         ! Default to first item if not found
         idx = 1
     end function find_file_in_list
+
+    subroutine detect_git_repo(dir, is_git, repo)
+        character(len=*), intent(in) :: dir
+        logical, intent(out) :: is_git
+        character(len=*), intent(out) :: repo
+        integer :: stat
+        character(len=MAX_PATH) :: temp_file, git_dir
+
+        is_git = .false.
+        repo = ""
+
+        ! Check if .git directory exists
+        call execute_command_line("git -C '" // trim(dir) // "' rev-parse --git-dir > /dev/null 2>&1", &
+                                  exitstat=stat, wait=.true.)
+        is_git = (stat == 0)
+
+        if (is_git) then
+            ! Get repo name (basename of repo root)
+            call get_environment_variable("HOME", temp_file)
+            temp_file = trim(temp_file) // "/.fortress_repo"
+            call execute_command_line("git -C '" // trim(dir) // "' rev-parse --show-toplevel 2>/dev/null | " // &
+                                     "xargs basename > " // trim(temp_file), wait=.true.)
+            open(newunit=stat, file=temp_file, status='old', iostat=i)
+            if (i == 0) then
+                read(stat, '(a)', iostat=i) repo
+                close(stat)
+            end if
+            call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+        end if
+    end subroutine detect_git_repo
+
+    subroutine get_git_status(dir, files, count, is_staged, is_unstaged, is_untracked)
+        character(len=*), intent(in) :: dir
+        character(len=*), dimension(*), intent(in) :: files
+        integer, intent(in) :: count
+        logical, dimension(*), intent(out) :: is_staged, is_unstaged, is_untracked
+        character(len=MAX_PATH) :: temp_file, line, file_path, git_status
+        integer :: unit, ios, stat, i, j
+        character(len=MAX_PATH) :: full_path
+
+        ! Initialize all to false
+        do i = 1, count
+            is_staged(i) = .false.
+            is_unstaged(i) = .false.
+            is_untracked(i) = .false.
+        end do
+
+        ! Get git status
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_git_status"
+        call execute_command_line("cd '" // trim(dir) // "' && git status --porcelain 2>/dev/null > " // &
+                                 trim(temp_file), exitstat=stat, wait=.true.)
+
+        if (stat /= 0) return
+
+        ! Parse git status output
+        open(newunit=unit, file=temp_file, status='old', iostat=ios)
+        if (ios /= 0) return
+
+        do
+            read(unit, '(a)', iostat=ios) line
+            if (ios /= 0) exit
+
+            if (len_trim(line) > 3) then
+                git_status = line(1:2)
+                file_path = trim(adjustl(line(4:)))
+
+                ! Match against our file list
+                do i = 1, count
+                    if (trim(files(i)) == trim(file_path)) then
+                        ! Parse git status (XY format)
+                        is_untracked(i) = (git_status == '??')
+                        is_staged(i) = (git_status(1:1) /= ' ' .and. git_status(1:1) /= '?')
+                        is_unstaged(i) = (git_status(2:2) /= ' ' .and. .not. is_untracked(i))
+                        exit
+                    end if
+                end do
+            end if
+        end do
+
+        close(unit)
+        call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+    end subroutine get_git_status
+
+    subroutine write_git_indicators(staged, unstaged, untracked, highlighted)
+        logical, intent(in) :: staged, unstaged, untracked, highlighted
+
+        ! Write indicators without RESET (caller handles that)
+        if (staged) then
+            if (highlighted) then
+                write(output_unit, '(a)', advance='no') GREEN // " ↑"
+            else
+                write(output_unit, '(a)', advance='no') GREEN // " ↑" // RESET
+            end if
+        end if
+        if (unstaged) then
+            if (highlighted) then
+                write(output_unit, '(a)', advance='no') RED // " ✗"
+            else
+                write(output_unit, '(a)', advance='no') RED // " ✗" // RESET
+            end if
+        end if
+        if (untracked) then
+            if (highlighted) then
+                write(output_unit, '(a)', advance='no') GREY // " ✗"
+            else
+                write(output_unit, '(a)', advance='no') GREY // " ✗" // RESET
+            end if
+        end if
+    end subroutine write_git_indicators
+
+    subroutine git_add_file(dir, filename)
+        character(len=*), intent(in) :: dir, filename
+        character(len=MAX_PATH*2) :: git_cmd
+        integer :: stat
+
+        ! Build git add command
+        git_cmd = "cd '" // trim(dir) // "' && git add '" // trim(filename) // "' 2>/dev/null"
+        call execute_command_line(trim(git_cmd), exitstat=stat, wait=.true.)
+
+        ! Note: git status will be refreshed in the next main loop iteration
+    end subroutine git_add_file
+
+    subroutine git_commit_prompt(dir)
+        character(len=*), intent(in) :: dir
+        character(len=512) :: commit_msg
+        character(len=MAX_PATH*2) :: git_cmd
+        integer :: stat, ios
+
+        ! Clear screen and show prompt
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)', advance='no') BOLD // "Git Commit" // RESET // " - " // trim(repo_name)
+        write(output_unit, *)
+        write(output_unit, *)
+        write(output_unit, '(a)', advance='no') "Commit message: "
+
+        ! Restore terminal to canonical mode for reading input
+        call execute_command_line("stty icanon echo 2>/dev/null")
+
+        ! Read commit message
+        read(*, '(a)', iostat=ios) commit_msg
+
+        ! Restore raw mode
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+
+        if (ios == 0 .and. len_trim(commit_msg) > 0) then
+            ! Execute git commit (use single quotes for message to avoid escaping issues)
+            git_cmd = "cd '" // trim(dir) // "' && git commit -m '" // trim(commit_msg) // "' 2>&1"
+            call execute_command_line(trim(git_cmd), exitstat=stat, wait=.true.)
+
+            ! Show result briefly
+            write(output_unit, *)
+            if (stat == 0) then
+                write(output_unit, '(a)') GREEN // "✓ Committed successfully!" // RESET
+            else
+                write(output_unit, '(a)') RED // "✗ Commit failed (nothing to commit?)" // RESET
+            end if
+            write(output_unit, '(a)') "Press any key to continue..."
+
+            ! Wait for keypress
+            read(*, '(a1)', advance='no') key
+        end if
+    end subroutine git_commit_prompt
 
 end program fortress_clean

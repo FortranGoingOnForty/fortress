@@ -61,14 +61,55 @@ fortress  # instead of 'fpm run'
 
 This allows you to navigate to directories and have your shell follow when you press 'c'.
 
+### Development
+
+```bash
+# Run tests
+fpm test
+
+# Build with debug flags
+fpm build --flag "-g -Wall -Wextra"
+```
+
+## Features
+
+### File Explorer
+- ✅ **Dual-pane display** inspired by Ranger/MC (parent dir 30% | current dir 70%)
+- ✅ **Real filesystem navigation** with directory reading
+- ✅ **Smart selection memory** - remembers position when navigating
+- ✅ **Visual hierarchy** - dimmed parent pane, active current pane
+- ✅ **Color-coded files**:
+  - Directories: Blue + bold
+  - Executable files: Green
+  - Dotfiles: Grey
+  - Regular files: White
+- ✅ **Smooth scrolling** - viewport follows cursor automatically
+- ✅ **Fuzzy finding with fzf** - press 'f' to search recursively and jump to files
+- ✅ **CD on exit** - press 'c' to navigate your shell to selected directory
+
+### Git Integration (inspired by fuss)
+- ✅ **Git status indicators**:
+  - `↑` (green) = Staged
+  - `✗` (red) = Modified/unstaged
+  - `✗` (grey) = Untracked
+- ✅ **Repo name in status bar** - shows current repo name
+- ✅ **Quick staging** - press 'A' to git add selected file
+- ✅ **Interactive commits** - press 'M' for commit message prompt
+- ✅ **Real-time updates** - indicators refresh after staging
+
 ## Controls
 
+### Navigation
 - `↑/↓`: Navigate up/down
 - `→`: Enter directory
 - `←`: Go back to parent directory
 - `f`: Fuzzy find files with fzf (searches recursively)
 - `c`: CD to selected directory and exit (requires shell integration)
 - `q`: Quit
+
+### Git Commands (when in a git repository)
+- `A`: Stage selected file (git add)
+- `M`: Commit with message prompt (git commit -m)
 
 ## License
 
