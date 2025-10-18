@@ -1,6 +1,6 @@
 Name:           fortress
-Version:        0.4.0
-Release:        2%{?dist}
+Version:        0.5.0
+Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
 License:        MIT
@@ -103,6 +103,12 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.5.0-1
+- Major refactor: modularize codebase into src/ directory
+- Add branch info to git status bar
+- Make git integration reactive
+- Improved code organization and maintainability
+
 * Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.4.0-2
 - Add git as runtime dependency for git integration features
 
