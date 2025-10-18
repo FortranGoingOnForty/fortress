@@ -1,5 +1,5 @@
 Name:           fortress
-Version:        0.2.0
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -102,6 +102,12 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.4.0-1
+- Add git integration features with status display
+- Add 'U' key to unstage staged files in listing
+- Fix terminal size handling issues
+- Various bug fixes and improvements
+
 * Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.2.0-1
 - Add fzf integration for fuzzy file search
 - Fix cursor clamping to prevent disappearing on ..
