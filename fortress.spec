@@ -1,5 +1,5 @@
 Name:           fortress
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -12,6 +12,7 @@ BuildRequires:  gcc
 BuildRequires:  fpm
 Requires:       glibc
 Requires:       gcc-libs
+Requires:       fzf
 
 %description
 FORTRESS is a command-line file explorer written in modern Fortran with fzf integration.
@@ -101,6 +102,13 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.2.0-1
+- Add fzf integration for fuzzy file search
+- Fix cursor clamping to prevent disappearing on ..
+- Fix cd-on-exit regression
+- Various cursor fixes and improvements
+- Add fzf as runtime dependency
+
 * Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.1.0-1
 - Initial RPM release
 - Dual-pane file explorer with Fortran implementation
