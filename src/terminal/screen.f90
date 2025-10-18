@@ -1,6 +1,6 @@
 module terminal_screen
     use iso_c_binding
-    use iso_fortran_env, only: output_unit
+    use iso_fortran_env, only: output_unit, input_unit
     implicit none
     private
 
@@ -44,19 +44,35 @@ contains
 
     subroutine get_terminal_size(rows, cols)
         integer, intent(out) :: rows, cols
-        character(len=100) :: output
-        integer :: stat
+        character(len=20) :: env_lines, env_cols
+        integer :: ios
 
         ! Default values
         rows = 24
         cols = 80
 
-        ! Try to get actual terminal size
-        call execute_command_line("tput lines", wait=.true., cmdstat=stat, cmdmsg=output)
-        if (stat == 0) read(output, *) rows
+        ! Try environment variables first
+        call get_environment_variable("LINES", env_lines)
+        call get_environment_variable("COLUMNS", env_cols)
 
-        call execute_command_line("tput cols", wait=.true., cmdstat=stat, cmdmsg=output)
-        if (stat == 0) read(output, *) cols
+        if (len_trim(env_lines) > 0) then
+            read(env_lines, *, iostat=ios) rows
+            if (ios /= 0) rows = 24
+        end if
+
+        if (len_trim(env_cols) > 0) then
+            read(env_cols, *, iostat=ios) cols
+            if (ios /= 0) cols = 80
+        end if
+
+        ! If environment variables not set, try using ANSI escape sequence
+        ! This is a more complex method but works on most terminals
+        if (len_trim(env_lines) == 0 .or. len_trim(env_cols) == 0) then
+            ! For now, use reasonable defaults that work on most terminals
+            ! Could implement CSI DSR (Device Status Report) later
+            rows = 40  ! Common terminal height
+            cols = 100 ! Common terminal width
+        end if
     end subroutine get_terminal_size
 
 end module terminal_screen

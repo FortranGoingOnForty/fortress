@@ -1,6 +1,5 @@
 module filesystem_ops
     use iso_c_binding
-    use filesystem_c_interface
     implicit none
     private
 
@@ -21,12 +20,9 @@ contains
     function list_directory(path) result(entries)
         character(len=*), intent(in) :: path
         type(file_entry), dimension(MAX_FILES) :: entries
-        type(c_ptr) :: dir_handle, entry_ptr
-        type(c_dirent), pointer :: dir_entry
-        type(c_stat_buf), target :: stat_buf
-        character(kind=c_char, len=MAX_PATH), target :: c_path
-        character(len=MAX_PATH) :: full_path
-        integer :: count, i, stat_result
+        character(len=MAX_PATH) :: temp_file
+        character(len=MAX_PATH) :: line, full_path
+        integer :: unit, ios, count, i
 
         ! Initialize entries
         do i = 1, MAX_FILES
@@ -35,43 +31,41 @@ contains
             entries(i)%size = 0
         end do
 
-        ! Convert Fortran string to C string
-        c_path = trim(path) // c_null_char
+        ! Create a temporary file to store ls output
+        temp_file = "/tmp/fortress_ls_temp.txt"
 
-        ! Open directory
-        dir_handle = c_opendir(c_loc(c_path))
-        if (.not. c_associated(dir_handle)) return
+        ! Use ls -1 for simpler parsing
+        call execute_command_line("ls -1a '" // trim(path) // "' > " // trim(temp_file), wait=.true.)
+
+        ! Open and read the temp file
+        open(newunit=unit, file=temp_file, status='old', action='read', iostat=ios)
+        if (ios /= 0) return
 
         count = 0
+
         do
-            entry_ptr = c_readdir(dir_handle)
-            if (.not. c_associated(entry_ptr)) exit
+            read(unit, '(a)', iostat=ios) line
+            if (ios /= 0) exit
+            if (count >= MAX_FILES) exit
+            if (len_trim(line) == 0) cycle
 
             count = count + 1
-            if (count > MAX_FILES) exit
 
-            call c_f_pointer(entry_ptr, dir_entry)
+            ! Store the filename
+            entries(count)%name = trim(adjustl(line))
 
-            ! Convert C string to Fortran string
-            entries(count)%name = ""
-            do i = 1, 255
-                if (dir_entry%d_name(i) == c_null_char) exit
-                entries(count)%name(i:i) = dir_entry%d_name(i)
-            end do
-
-            ! Get file stats
+            ! Check if it's a directory using the is_directory function
             full_path = trim(path) // "/" // trim(entries(count)%name)
-            c_path = trim(full_path) // c_null_char
-            stat_result = c_stat(c_loc(c_path), c_loc(stat_buf))
+            entries(count)%is_dir = is_directory(full_path)
 
-            if (stat_result == 0) then
-                entries(count)%is_dir = S_ISDIR(stat_buf%st_mode)
-                entries(count)%size = stat_buf%st_size
-            end if
+            ! For now, set size to 0 (could add stat later)
+            entries(count)%size = 0
         end do
 
-        ! Close directory
-        i = c_closedir(dir_handle)
+        close(unit)
+
+        ! Clean up temp file
+        call execute_command_line("rm -f " // trim(temp_file), wait=.false.)
     end function list_directory
 
     function get_parent_dir(path) result(parent)
@@ -95,40 +89,37 @@ contains
     function is_directory(path) result(is_dir)
         character(len=*), intent(in) :: path
         logical :: is_dir
-        type(c_stat_buf), target :: stat_buf
-        character(kind=c_char, len=MAX_PATH), target :: c_path
-        integer :: stat_result
+        integer :: stat
 
         is_dir = .false.
-        c_path = trim(path) // c_null_char
-        stat_result = c_stat(c_loc(c_path), c_loc(stat_buf))
 
-        if (stat_result == 0) then
-            is_dir = S_ISDIR(stat_buf%st_mode)
-        end if
+        ! Use test command to check if it's a directory
+        call execute_command_line("test -d '" // trim(path) // "'", &
+                                  exitstat=stat, wait=.true.)
+        is_dir = (stat == 0)
     end function is_directory
 
     function get_current_dir() result(cwd)
         character(len=MAX_PATH) :: cwd
-        character(kind=c_char, len=MAX_PATH), target :: c_buffer
-        type(c_ptr) :: result_ptr
+        character(len=MAX_PATH) :: temp_file
+        integer :: unit, ios
 
-        c_buffer = ""
-        result_ptr = c_getcwd(c_loc(c_buffer), int(MAX_PATH, c_size_t))
+        ! Create a temporary file to store pwd output
+        temp_file = "/tmp/fortress_pwd_temp.txt"
+        call execute_command_line("pwd > " // trim(temp_file), wait=.true.)
 
-        if (c_associated(result_ptr)) then
-            ! Convert C string to Fortran string
-            cwd = ""
-            block
-                integer :: i
-                do i = 1, MAX_PATH
-                    if (c_buffer(i:i) == c_null_char) exit
-                    cwd(i:i) = c_buffer(i:i)
-                end do
-            end block
-        else
+        ! Read the current directory
+        open(newunit=unit, file=temp_file, status='old', action='read', iostat=ios)
+        if (ios /= 0) then
             cwd = "."
+        else
+            read(unit, '(a)', iostat=ios) cwd
+            if (ios /= 0) cwd = "."
+            close(unit)
         end if
+
+        ! Clean up temp file
+        call execute_command_line("rm -f " // trim(temp_file), wait=.false.)
     end function get_current_dir
 
 end module filesystem_ops
