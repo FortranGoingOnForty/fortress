@@ -5,6 +5,7 @@ program fortress_clean
     ! Constants
     integer, parameter :: MAX_PATH = 512
     integer, parameter :: MAX_FILES = 500
+    
     character(len=*), parameter :: ESC = char(27)
     character(len=*), parameter :: CLEAR = ESC // "[2J" // ESC // "[H"
     character(len=*), parameter :: BOLD = ESC // "[1m"
