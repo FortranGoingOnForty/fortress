@@ -18,10 +18,17 @@ class Fortress < Formula
     built_binary = Dir["build/gfortran_*/app/fortress"].first
     raise "Could not find built binary" unless built_binary
 
-    # Install the binary
+    # Install the actual binary
     bin.install built_binary => "fortress-bin"
 
-    # Install shell integration files
+    # Create a simple wrapper script for basic usage
+    # Note: For cd-on-exit feature, users still need to source the shell integration
+    (bin/"fortress").write <<~EOS
+      #!/bin/bash
+      exec "#{bin}/fortress-bin" "$@"
+    EOS
+
+    # Install shell integration files for cd-on-exit feature
     (share/"fortress").install "fortress.sh"
     (share/"fortress").install "fortress.fish"
 
@@ -34,37 +41,32 @@ class Fortress < Formula
     <<~EOS
       FORTRESS has been installed!
 
-      The binary is installed as 'fortress-bin', but you'll want to use
-      the shell wrapper function for the cd-on-exit feature.
+      Basic usage:
+        fortress  # Works immediately, all git features included
 
-      === Bash/Zsh Setup ===
-      Add to your ~/.bashrc or ~/.zshrc:
+      === CD-ON-EXIT FEATURE (Optional) ===
+      To enable the 'c' key to change your shell's directory:
+
+      Bash/Zsh - Add to ~/.bashrc or ~/.zshrc:
         source #{HOMEBREW_PREFIX}/share/fortress/fortress.sh
 
-      Then restart your shell or run:
-        source ~/.bashrc  # or ~/.zshrc
-
-      === Fish Setup ===
-      Add to your ~/.config/fish/config.fish:
+      Fish - Add to ~/.config/fish/config.fish:
         source #{HOMEBREW_PREFIX}/share/fortress/fortress.fish
 
-      Then restart your shell or run:
-        source ~/.config/fish/config.fish
+      Then restart your shell or source the config file.
 
-      === Usage ===
-      After setup, just run:
-        fortress
-
-      Press 'c' on any directory to cd there and exit.
+      With shell integration, press 'c' on any directory to cd there and exit.
 
       Documentation: #{HOMEBREW_PREFIX}/share/doc/fortress/
     EOS
   end
 
   test do
-    # Test that the binary exists and runs
+    # Test that both binaries exist and are executable
     assert_predicate bin/"fortress-bin", :exist?
     assert_predicate bin/"fortress-bin", :executable?
+    assert_predicate bin/"fortress", :exist?
+    assert_predicate bin/"fortress", :executable?
 
     # Test that shell integration files exist
     assert_predicate share/"fortress/fortress.sh", :exist?
