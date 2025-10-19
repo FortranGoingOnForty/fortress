@@ -1,6 +1,7 @@
 # FORTRESS
+(noun) : all your base are belong to us
 
-A command-line file explorer written in modern Fortran with fzf integration.
+A command-line file explorer written in modern Fortran with fzf integration and git binds for fast staging and committing.
 
 ## Installation
 
@@ -16,6 +17,13 @@ Shell integration is automatically set up for bash and fish. Zsh users need to a
 ```bash
 source /usr/share/fortress/fortress.sh
 ```
+
+### Homebrew
+```bash
+brew tap FortranGoingOnForty/fortress
+brew install fortress
+```
+Follow the caveats or quick directory jump won't work!
 
 ### From Source
 
@@ -109,6 +117,7 @@ fpm build --flag "-g -Wall -Wextra"
 
 ### Git Commands (when in a git repository)
 - `A`: Stage selected file (git add)
+- `U`: Unstage selected file (git restore --staged)
 - `M`: Commit with message prompt (git commit -m)
 
 ## License
