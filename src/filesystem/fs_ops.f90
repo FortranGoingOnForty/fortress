@@ -210,30 +210,30 @@ contains
         ! Try $EDITOR first (preferred for text editing)
         call get_environment_variable("EDITOR", editor, status=stat)
         if (stat == 0 .and. len_trim(editor) > 0) then
-            ! Restore terminal to canonical mode
-            call execute_command_line("stty icanon echo 2>/dev/null")
+            ! Restore terminal to normal mode (like fuss does for pager)
+            call execute_command_line("stty sane < /dev/tty", exitstat=stat)
 
-            ! Open with $EDITOR
+            ! Open with $EDITOR - wait for it to finish
             open_cmd = trim(editor) // " '" // trim(filepath) // "'"
             call execute_command_line(trim(open_cmd), exitstat=stat, wait=.true.)
 
             ! Restore raw mode
-            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+            call execute_command_line("stty -icanon -echo min 1 time 0 < /dev/tty", exitstat=stat)
             return
         end if
 
         ! Try $VISUAL as fallback
         call get_environment_variable("VISUAL", visual, status=stat)
         if (stat == 0 .and. len_trim(visual) > 0) then
-            ! Restore terminal to canonical mode
-            call execute_command_line("stty icanon echo 2>/dev/null")
+            ! Restore terminal to normal mode
+            call execute_command_line("stty sane < /dev/tty", exitstat=stat)
 
-            ! Open with $VISUAL
+            ! Open with $VISUAL - wait for it to finish
             open_cmd = trim(visual) // " '" // trim(filepath) // "'"
             call execute_command_line(trim(open_cmd), exitstat=stat, wait=.true.)
 
             ! Restore raw mode
-            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+            call execute_command_line("stty -icanon -echo min 1 time 0 < /dev/tty", exitstat=stat)
             return
         end if
 
@@ -252,12 +252,15 @@ contains
         end if
         call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
 
-        ! Use platform-specific opener
+        ! Restore terminal before launching (in case default app is terminal-based)
+        call execute_command_line("stty sane < /dev/tty", exitstat=stat)
+
+        ! Use platform-specific opener (run in background, don't wait)
         if (index(platform, "Darwin") > 0) then
-            ! macOS
+            ! macOS - open launches apps in new windows (usually GUI)
             open_cmd = "open '" // trim(filepath) // "' 2>/dev/null &"
         else if (index(platform, "Linux") > 0) then
-            ! Linux
+            ! Linux - xdg-open uses desktop environment defaults
             open_cmd = "xdg-open '" // trim(filepath) // "' 2>/dev/null &"
         else
             ! Unknown platform - try xdg-open as a reasonable default
@@ -265,6 +268,9 @@ contains
         end if
 
         call execute_command_line(trim(open_cmd), wait=.false.)
+
+        ! Restore raw mode immediately (since we're not waiting for the app)
+        call execute_command_line("stty -icanon -echo min 1 time 0 < /dev/tty", exitstat=stat)
     end subroutine open_file_in_default_app
 
 end module filesystem_ops
