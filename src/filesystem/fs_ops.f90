@@ -4,6 +4,7 @@ module filesystem_ops
 
     public :: get_file_list, get_pwd, get_parent_path, join_path
     public :: find_in_parent, find_file_in_list, fzf_search, write_exit_dir
+    public :: open_file_in_default_app
     public :: MAX_PATH, MAX_FILES
 
     integer, parameter :: MAX_PATH = 512
@@ -199,5 +200,71 @@ contains
             close(unit)
         end if
     end subroutine write_exit_dir
+
+    subroutine open_file_in_default_app(filepath)
+        character(len=*), intent(in) :: filepath
+        character(len=MAX_PATH) :: editor, visual, platform, temp_file
+        character(len=MAX_PATH*2) :: open_cmd
+        integer :: stat, unit, ios
+
+        ! Try $EDITOR first (preferred for text editing)
+        call get_environment_variable("EDITOR", editor, status=stat)
+        if (stat == 0 .and. len_trim(editor) > 0) then
+            ! Restore terminal to canonical mode
+            call execute_command_line("stty icanon echo 2>/dev/null")
+
+            ! Open with $EDITOR
+            open_cmd = trim(editor) // " '" // trim(filepath) // "'"
+            call execute_command_line(trim(open_cmd), exitstat=stat, wait=.true.)
+
+            ! Restore raw mode
+            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+            return
+        end if
+
+        ! Try $VISUAL as fallback
+        call get_environment_variable("VISUAL", visual, status=stat)
+        if (stat == 0 .and. len_trim(visual) > 0) then
+            ! Restore terminal to canonical mode
+            call execute_command_line("stty icanon echo 2>/dev/null")
+
+            ! Open with $VISUAL
+            open_cmd = trim(visual) // " '" // trim(filepath) // "'"
+            call execute_command_line(trim(open_cmd), exitstat=stat, wait=.true.)
+
+            ! Restore raw mode
+            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+            return
+        end if
+
+        ! Fall back to platform-specific default application opener
+        ! Detect platform using uname
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_platform"
+        call execute_command_line("uname > " // trim(temp_file) // " 2>/dev/null", wait=.true.)
+
+        open(newunit=unit, file=temp_file, status='old', iostat=ios)
+        if (ios == 0) then
+            read(unit, '(a)', iostat=ios) platform
+            close(unit)
+        else
+            platform = "unknown"
+        end if
+        call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+
+        ! Use platform-specific opener
+        if (index(platform, "Darwin") > 0) then
+            ! macOS
+            open_cmd = "open '" // trim(filepath) // "' 2>/dev/null &"
+        else if (index(platform, "Linux") > 0) then
+            ! Linux
+            open_cmd = "xdg-open '" // trim(filepath) // "' 2>/dev/null &"
+        else
+            ! Unknown platform - try xdg-open as a reasonable default
+            open_cmd = "xdg-open '" // trim(filepath) // "' 2>/dev/null &"
+        end if
+
+        call execute_command_line(trim(open_cmd), wait=.false.)
+    end subroutine open_file_in_default_app
 
 end module filesystem_ops

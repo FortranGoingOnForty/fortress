@@ -179,6 +179,12 @@ program fortress
             if (in_git_repo) then
                 call git_tag_prompt(current_dir, repo_name)
             end if
+        case(79, 111)  ! 'O' or 'o' - open file
+            if (.not. current_is_dir(selected)) then
+                if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                    call open_file_in_default_app(join_path(current_dir, current_files(selected)))
+                end if
+            end if
         end select
     end do
 
