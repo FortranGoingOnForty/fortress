@@ -100,7 +100,7 @@ contains
         ! Footer
         if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "↑↓:nav →:enter ←:back f:find A:add U:unstage M:commit c:cd q:quit" // RESET
+                                     DIM // "↑↓:nav →:enter ←:back f:find A:add U:unstage M:commit P:push T:tag c:cd q:quit" // RESET
         else
             write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back f:find c:cd q:quit" // RESET
         end if

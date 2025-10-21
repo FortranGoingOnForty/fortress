@@ -7,6 +7,7 @@ module git_ops
 
     public :: detect_git_repo, get_git_status, write_git_indicators
     public :: git_add_file, git_unstage_file, git_commit_prompt
+    public :: git_push_prompt, git_tag_prompt, prompt_upstream_selection
 
 contains
 
@@ -192,5 +193,172 @@ contains
             read(*, '(a1)', advance='no') key
         end if
     end subroutine git_commit_prompt
+
+    subroutine prompt_upstream_selection(dir, success)
+        character(len=*), intent(in) :: dir
+        logical, intent(out) :: success
+        character(len=MAX_PATH) :: temp_file, selected_branch
+        integer :: stat, unit, ios
+
+        success = .false.
+
+        ! Clear screen and show prompt
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)') BOLD // "No upstream branch configured" // RESET
+        write(output_unit, *)
+        write(output_unit, '(a)') "Select a remote branch to track:"
+        write(output_unit, *)
+
+        ! Restore terminal for fzf
+        call execute_command_line("stty sane 2>/dev/null")
+
+        ! Use fzf to select remote branch
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_upstream"
+        call execute_command_line("cd '" // trim(dir) // "' && git branch -r | grep -v HEAD | " // &
+                                 "sed 's/^[[:space:]]*//' | fzf --height=10 --prompt='Select upstream: ' > " // &
+                                 trim(temp_file) // " 2>/dev/null", exitstat=stat, wait=.true.)
+
+        if (stat /= 0) then
+            write(output_unit, '(a)') RED // "No upstream selected." // RESET
+            call execute_command_line("sleep 1")
+            ! Re-enable raw mode
+            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+            call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+            return
+        end if
+
+        ! Read selected branch
+        open(newunit=unit, file=temp_file, status='old', action='read', iostat=ios)
+        if (ios == 0) then
+            read(unit, '(a)', iostat=ios) selected_branch
+            close(unit)
+
+            if (ios == 0 .and. len_trim(selected_branch) > 0) then
+                ! Set upstream
+                call execute_command_line("cd '" // trim(dir) // "' && git branch --set-upstream-to=" // &
+                                         trim(selected_branch) // " 2>&1", exitstat=stat, wait=.true.)
+
+                if (stat == 0) then
+                    write(output_unit, '(a)') GREEN // "✓ Upstream set to: " // trim(selected_branch) // RESET
+                    success = .true.
+                else
+                    write(output_unit, '(a)') RED // "✗ Failed to set upstream" // RESET
+                end if
+                call execute_command_line("sleep 1")
+            end if
+        end if
+
+        call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+        ! Re-enable raw mode
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+    end subroutine prompt_upstream_selection
+
+    subroutine git_push_prompt(dir, repo_name)
+        character(len=*), intent(in) :: dir, repo_name
+        character(len=MAX_PATH*2) :: git_cmd
+        character(len=1) :: key
+        integer :: stat
+        logical :: upstream_set
+
+        ! Clear screen and show prompt
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)', advance='no') BOLD // "Git Push" // RESET // " - " // trim(repo_name)
+        write(output_unit, *)
+        write(output_unit, *)
+
+        ! Check if upstream is configured
+        call execute_command_line("cd '" // trim(dir) // "' && git rev-parse --abbrev-ref @{upstream} " // &
+                                 "> /dev/null 2>&1", exitstat=stat, wait=.true.)
+
+        if (stat /= 0) then
+            ! No upstream configured - prompt user to select one
+            call prompt_upstream_selection(dir, upstream_set)
+            if (.not. upstream_set) return
+            ! Clear screen again after upstream selection
+            write(output_unit, '(a)', advance='no') CLEAR
+            write(output_unit, '(a)', advance='no') BOLD // "Git Push" // RESET // " - " // trim(repo_name)
+            write(output_unit, *)
+            write(output_unit, *)
+        end if
+
+        write(output_unit, '(a)') "Pushing to remote..."
+        write(output_unit, *)
+
+        ! Execute git push
+        git_cmd = "cd '" // trim(dir) // "' && git push 2>&1"
+        call execute_command_line(trim(git_cmd), exitstat=stat, wait=.true.)
+
+        ! Show result
+        write(output_unit, *)
+        if (stat == 0) then
+            write(output_unit, '(a)') GREEN // "✓ Pushed successfully!" // RESET
+        else
+            write(output_unit, '(a)') RED // "✗ Push failed" // RESET
+        end if
+        write(output_unit, '(a)') "Press any key to continue..."
+
+        ! Wait for keypress
+        read(*, '(a1)', advance='no') key
+    end subroutine git_push_prompt
+
+    subroutine git_tag_prompt(dir, repo_name)
+        character(len=*), intent(in) :: dir, repo_name
+        character(len=512) :: tag_name, tag_message
+        character(len=MAX_PATH*2) :: git_cmd
+        character(len=1) :: key
+        integer :: stat, ios
+
+        ! Clear screen and show prompt
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)', advance='no') BOLD // "Git Tag" // RESET // " - " // trim(repo_name)
+        write(output_unit, *)
+        write(output_unit, *)
+        write(output_unit, '(a)', advance='no') "Tag name: "
+
+        ! Restore terminal to canonical mode for reading input
+        call execute_command_line("stty icanon echo 2>/dev/null")
+
+        ! Read tag name
+        read(*, '(a)', iostat=ios) tag_name
+
+        if (ios == 0 .and. len_trim(tag_name) > 0) then
+            ! Read tag message (optional)
+            write(output_unit, '(a)', advance='no') "Tag message (enter for none): "
+            read(*, '(a)', iostat=ios) tag_message
+
+            ! Restore raw mode
+            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+
+            if (ios == 0) then
+                ! Execute git tag
+                if (len_trim(tag_message) > 0) then
+                    ! Create annotated tag with message
+                    git_cmd = "cd '" // trim(dir) // "' && git tag -a '" // trim(tag_name) // &
+                             "' -m '" // trim(tag_message) // "' 2>&1"
+                else
+                    ! Create lightweight tag (no message)
+                    git_cmd = "cd '" // trim(dir) // "' && git tag '" // trim(tag_name) // "' 2>&1"
+                end if
+
+                call execute_command_line(trim(git_cmd), exitstat=stat, wait=.true.)
+
+                ! Show result
+                write(output_unit, *)
+                if (stat == 0) then
+                    write(output_unit, '(a)') GREEN // "✓ Tag created: " // trim(tag_name) // RESET
+                else
+                    write(output_unit, '(a)') RED // "✗ Failed to create tag" // RESET
+                end if
+                write(output_unit, '(a)') "Press any key to continue..."
+
+                ! Wait for keypress
+                read(*, '(a1)', advance='no') key
+            end if
+        else
+            ! Restore raw mode if tag name was empty
+            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+        end if
+    end subroutine git_tag_prompt
 
 end module git_ops

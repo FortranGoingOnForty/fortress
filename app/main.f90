@@ -171,6 +171,14 @@ program fortress
             if (in_git_repo) then
                 call git_commit_prompt(current_dir, repo_name)
             end if
+        case(80, 112)  ! 'P' or 'p' - git push
+            if (in_git_repo) then
+                call git_push_prompt(current_dir, repo_name)
+            end if
+        case(84, 116)  ! 'T' or 't' - git tag
+            if (in_git_repo) then
+                call git_tag_prompt(current_dir, repo_name)
+            end if
         end select
     end do
 
