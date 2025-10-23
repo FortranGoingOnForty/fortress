@@ -8,6 +8,7 @@ module git_ops
     public :: detect_git_repo, get_git_status, write_git_indicators
     public :: git_add_file, git_unstage_file, git_commit_prompt
     public :: git_push_prompt, git_tag_prompt, prompt_upstream_selection
+    public :: show_git_diff_fullscreen
 
 contains
 
@@ -360,5 +361,43 @@ contains
             call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
         end if
     end subroutine git_tag_prompt
+
+    subroutine show_git_diff_fullscreen(dir, filename, is_staged, is_unstaged)
+        character(len=*), intent(in) :: dir, filename
+        logical, intent(in) :: is_staged, is_unstaged
+        character(len=MAX_PATH*2) :: git_cmd
+        character(len=1) :: key
+
+        ! Clear screen
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)') BOLD // "Git Diff" // RESET // " - " // trim(filename)
+        write(output_unit, *)
+
+        ! Restore terminal to normal mode for better output
+        call execute_command_line("stty sane 2>/dev/null")
+
+        ! Build and execute diff command (show both staged and unstaged if both exist)
+        if (is_unstaged) then
+            write(output_unit, '(a)') BOLD // "Unstaged changes:" // RESET
+            git_cmd = "cd '" // trim(dir) // "' && git diff --color=always '" // trim(filename) // "' 2>&1"
+            call execute_command_line(trim(git_cmd), wait=.true.)
+            write(output_unit, *)
+        end if
+
+        if (is_staged) then
+            write(output_unit, '(a)') BOLD // "Staged changes:" // RESET
+            git_cmd = "cd '" // trim(dir) // "' && git diff --cached --color=always '" // trim(filename) // "' 2>&1"
+            call execute_command_line(trim(git_cmd), wait=.true.)
+            write(output_unit, *)
+        end if
+
+        ! Wait for keypress
+        write(output_unit, *)
+        write(output_unit, '(a)') GREY // "Press any key to return..." // RESET
+
+        ! Restore raw mode before reading
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+        read(*, '(a1)', advance='no') key
+    end subroutine show_git_diff_fullscreen
 
 end module git_ops

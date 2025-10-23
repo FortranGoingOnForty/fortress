@@ -185,6 +185,15 @@ program fortress
                     call open_file_in_default_app(join_path(current_dir, current_files(selected)))
                 end if
             end if
+        case(68, 100)  ! 'D' or 'd' - show git diff
+            if (in_git_repo .and. .not. current_is_dir(selected)) then
+                if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                    if (current_is_staged(selected) .or. current_is_unstaged(selected)) then
+                        call show_git_diff_fullscreen(current_dir, current_files(selected), &
+                                                      current_is_staged(selected), current_is_unstaged(selected))
+                    end if
+                end if
+            end if
         end select
     end do
 
