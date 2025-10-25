@@ -3,7 +3,7 @@ module terminal_control
     implicit none
     private
 
-    public :: get_term_size, setup_raw_mode, restore_terminal, read_arrow_key
+    public :: get_term_size, setup_raw_mode, restore_terminal, read_arrow_key, read_arrow_key_with_shift
     public :: ESC, CLEAR, BOLD, DIM, REVERSE, RESET
     public :: BLUE, GREEN, RED, GREY, WHITE, YELLOW
     public :: invalidate_term_cache
@@ -102,5 +102,47 @@ contains
             k = ch
         end if
     end subroutine read_arrow_key
+
+    subroutine read_arrow_key_with_shift(k, is_shift)
+        character(len=1), intent(out) :: k
+        logical, intent(out) :: is_shift
+        character(len=1) :: ch1, ch2, ch3, ch4
+
+        is_shift = .false.
+        k = ' '
+
+        ! Read first character after ESC
+        read(*, '(a1)', advance='no') ch1
+        if (ch1 /= '[') then
+            k = ch1
+            return
+        end if
+
+        ! Read second character
+        read(*, '(a1)', advance='no') ch2
+
+        ! Check if it's a simple arrow (just a letter)
+        if (ch2 == 'A' .or. ch2 == 'B' .or. ch2 == 'C' .or. ch2 == 'D') then
+            k = ch2
+            return
+        end if
+
+        ! Check for Shift+Arrow sequence: [1;2X where X is A/B/C/D
+        if (ch2 == '1') then
+            read(*, '(a1)', advance='no') ch3
+            if (ch3 == ';') then
+                read(*, '(a1)', advance='no') ch4
+                if (ch4 == '2') then
+                    ! This is a Shift+Arrow sequence
+                    read(*, '(a1)', advance='no') k
+                    is_shift = .true.
+                    return
+                end if
+            end if
+        end if
+
+        ! If we get here, it's some other sequence, treat as regular arrow
+        k = ch2
+    end subroutine read_arrow_key_with_shift
 
 end module terminal_control

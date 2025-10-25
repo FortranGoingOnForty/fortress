@@ -16,7 +16,8 @@ contains
                               selected, parent_selected, scroll_offset, parent_scroll_offset, &
                               in_git_repo, repo_name, branch_name, &
                               move_mode, move_source_name, move_dest_selected, &
-                              has_clipboard, clipboard_is_cut, clipboard_source_name)
+                              has_clipboard, clipboard_is_cut, clipboard_source_name, &
+                              is_selected, selection_count)
         integer, intent(in) :: r, c, current_count, parent_count, selected, parent_selected
         integer, intent(in) :: scroll_offset, parent_scroll_offset
         character(len=*), intent(in) :: current_dir, repo_name, branch_name
@@ -30,6 +31,8 @@ contains
         integer, intent(in) :: move_dest_selected
         logical, intent(in) :: has_clipboard, clipboard_is_cut
         character(len=*), intent(in) :: clipboard_source_name
+        logical, dimension(*), intent(in) :: is_selected
+        integer, intent(in) :: selection_count
         integer :: left_w, i, parent_idx, current_idx, vis_h
         character(len=256) :: fname
         character(len=20) :: color_code
@@ -41,6 +44,10 @@ contains
         if (move_mode) then
             write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
                                      " | " // RED // "MOVE: " // trim(move_source_name) // RESET
+        else if (selection_count > 0) then
+            ! Show selection count
+            write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
+                                     " | " // BLUE // trim(adjustl(itoa(selection_count))) // " selected" // RESET
         else if (has_clipboard) then
             if (clipboard_is_cut) then
                 write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
@@ -121,7 +128,7 @@ contains
                     end if
                     write(output_unit, '(a)') RESET
                 else if (current_idx == selected .and. .not. move_mode) then
-                    ! Normal selection (not in move mode)
+                    ! Normal selection cursor (not in move mode)
                     ! If file is cut, show selected with red background instead of default color
                     if (has_clipboard .and. clipboard_is_cut .and. &
                         trim(current_files(current_idx)) == trim(clipboard_source_name)) then
@@ -129,6 +136,17 @@ contains
                     else
                         write(output_unit, '(a)', advance='no') REVERSE // trim(color_code) // trim(fname)
                     end if
+                    ! Add git indicators if in repo
+                    if (in_git_repo) then
+                        call write_git_indicators(current_is_staged(current_idx), &
+                                                  current_is_unstaged(current_idx), &
+                                                  current_is_untracked(current_idx), &
+                                                  current_has_incoming(current_idx), .true.)
+                    end if
+                    write(output_unit, '(a)') RESET
+                else if (is_selected(current_idx)) then
+                    ! Multi-selected item (not the cursor) - show with cyan background
+                    write(output_unit, '(a)', advance='no') REVERSE // trim(color_code) // trim(fname)
                     ! Add git indicators if in repo
                     if (in_git_repo) then
                         call write_git_indicators(current_is_staged(current_idx), &
@@ -158,12 +176,24 @@ contains
         if (move_mode) then
             write(output_unit, '(a)') RED // "MOVE MODE: " // RESET // &
                                      DIM // "↑↓:next/prev dir →:enter dir ←:parent v:move here q:cancel" // RESET
+        else if (selection_count > 0) then
+            ! Selection mode footer - show multi-select help
+            write(output_unit, '(a)') BLUE // "MULTI-SELECT: " // RESET // &
+                                     DIM // "Space:toggle Shift+↑↓:block select y:copy x:cut p:paste r:delete | " // RESET // &
+                                     DIM // "→:enter ←:back c:cd q:quit" // RESET
         else if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
+                                     DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
         else
-            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
+            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
         end if
+
+    contains
+        function itoa(n) result(str)
+            integer, intent(in) :: n
+            character(len=10) :: str
+            write(str, '(i0)') n
+        end function itoa
     end subroutine draw_interface
 
     function get_file_color(filename, is_dir, is_exec) result(color)
