@@ -294,9 +294,8 @@ program fortress
                 call execute_move_file(move_source_path, current_dir, current_files(move_dest_selected), &
                                       current_is_dir(move_dest_selected))
                 move_mode = .false.
-            else if (.not. current_is_dir(selected) .and. &
-                     trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
-                ! Enter move mode - store source file
+            else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                ! Enter move mode - store source file or directory
                 move_source_path = join_path(current_dir, current_files(selected))
                 move_source_name = current_files(selected)
                 move_mode = .true.
@@ -434,12 +433,12 @@ contains
         write(output_unit, '(a)') BOLD // "Move Result" // RESET
         write(output_unit, *)
         if (stat == 0) then
-            write(output_unit, '(a)') GREEN // "✓ File moved successfully!" // RESET
+            write(output_unit, '(a)') GREEN // "✓ Moved successfully!" // RESET
             write(output_unit, '(a)') "  From: " // trim(source_path)
             write(output_unit, '(a)') "  To:   " // trim(dest_path)
         else
             write(output_unit, '(a)') RED // "✗ Move failed" // RESET
-            write(output_unit, '(a)') "  (file may already exist or invalid destination)"
+            write(output_unit, '(a)') "  (destination may already exist or be invalid)"
         end if
         write(output_unit, *)
 
