@@ -137,15 +137,10 @@ program fortress
 
         ! Handle input
         select case(ichar(key))
-        case(27)  ! ESC - arrow keys or cancel move mode
+        case(27)  ! ESC - arrow keys
             call read_arrow_key(key)
 
-            ! If standalone ESC (not followed by '['), cancel move mode
-            if (key /= 'A' .and. key /= 'B' .and. key /= 'C' .and. key /= 'D' .and. key /= '[') then
-                if (move_mode) then
-                    move_mode = .false.
-                end if
-            else if (move_mode) then
+            if (move_mode) then
                 ! In move mode, navigate directories only
                 select case(key)
                 case('A')  ! Up - jump to previous directory
@@ -207,8 +202,12 @@ program fortress
                     end if
                 end select
             end if
-        case(113, 81)  ! 'q' or 'Q' - quit
-            running = .false.
+        case(113, 81)  ! 'q' or 'Q' - exit move mode or quit
+            if (move_mode) then
+                move_mode = .false.
+            else
+                running = .false.
+            end if
         case(99, 67)  ! 'c' or 'C' - cd to directory on exit
             if (current_is_dir(selected)) then
                 if (trim(current_files(selected)) == "..") then
@@ -230,14 +229,14 @@ program fortress
                 selected = -2
                 call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
             end if
-        case(65, 97)  ! 'A' or 'a' - git add
-            if (in_git_repo .and. .not. current_is_dir(selected)) then
+        case(65, 97)  ! 'A' or 'a' - git add (batch stage directories)
+            if (in_git_repo) then
                 if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                     call git_add_file(current_dir, current_files(selected))
                 end if
             end if
-        case(85, 117)  ! 'U' or 'u' - git unstage
-            if (in_git_repo .and. .not. current_is_dir(selected)) then
+        case(85, 117)  ! 'U' or 'u' - git unstage (batch unstage directories)
+            if (in_git_repo) then
                 if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                     if (current_is_staged(selected)) then
                         call git_unstage_file(current_dir, current_files(selected))
