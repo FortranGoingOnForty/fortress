@@ -19,6 +19,7 @@ program fortress
     integer :: scroll_offset = 0, parent_scroll_offset = 0
     character(len=256) :: repo_name, branch_name
     logical :: in_git_repo = .false., running = .true., cd_on_exit = .false.
+    logical :: show_dotfiles = .true.
     character(len=1) :: key
     integer :: i, rows, cols, visible_height
 
@@ -33,6 +34,12 @@ program fortress
         ! Get files
         call get_file_list(current_dir, current_files, current_is_dir, current_is_exec, current_count)
         call get_file_list(parent_dir, parent_files, parent_is_dir, parent_is_exec, parent_count)
+
+        ! Filter dotfiles if needed
+        if (.not. show_dotfiles) then
+            call filter_dotfiles(current_files, current_is_dir, current_is_exec, current_count)
+            call filter_dotfiles(parent_files, parent_is_dir, parent_is_exec, parent_count)
+        end if
 
         ! Initialize git arrays - only for actual file counts
         do i = 1, current_count
@@ -205,6 +212,11 @@ program fortress
                     end if
                 end if
             end if
+        case(46)  ! '.' - toggle dotfiles visibility
+            show_dotfiles = .not. show_dotfiles
+            ! Reset selection to avoid going out of bounds
+            selected = 1
+            scroll_offset = 0
         end select
     end do
 
@@ -217,5 +229,35 @@ program fortress
     else
         write(output_unit, '(a)') "Thanks for using FORTRESS!"
     end if
+
+contains
+
+    subroutine filter_dotfiles(files, is_dir, is_exec, count)
+        character(len=*), dimension(*), intent(inout) :: files
+        logical, dimension(*), intent(inout) :: is_dir, is_exec
+        integer, intent(inout) :: count
+        character(len=MAX_PATH), dimension(MAX_FILES) :: temp_files
+        logical, dimension(MAX_FILES) :: temp_is_dir, temp_is_exec
+        integer :: i, new_count
+
+        new_count = 0
+        do i = 1, count
+            ! Always keep "." and "..", filter other dotfiles
+            if (trim(files(i)) == "." .or. trim(files(i)) == ".." .or. files(i)(1:1) /= '.') then
+                new_count = new_count + 1
+                temp_files(new_count) = files(i)
+                temp_is_dir(new_count) = is_dir(i)
+                temp_is_exec(new_count) = is_exec(i)
+            end if
+        end do
+
+        ! Copy back
+        do i = 1, new_count
+            files(i) = temp_files(i)
+            is_dir(i) = temp_is_dir(i)
+            is_exec(i) = temp_is_exec(i)
+        end do
+        count = new_count
+    end subroutine filter_dotfiles
 
 end program fortress

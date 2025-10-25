@@ -103,9 +103,9 @@ contains
         ! Footer
         if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "↑↓:nav →:enter ←:back s:search o:open d:diff a:add u:unstage m:commit f:fetch l:pull p:push t:tag c:cd q:quit" // RESET
+                                     DIM // "↑↓:nav →:enter ←:back s:search o:open .:toggle-hidden a:add u:unstage m:commit f:fetch l:pull p:push c:cd q:quit" // RESET
         else
-            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back s:search o:open c:cd q:quit" // RESET
+            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back s:search o:open .:toggle-hidden c:cd q:quit" // RESET
         end if
     end subroutine draw_interface
 
