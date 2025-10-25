@@ -128,14 +128,24 @@ program fortress
                            in_git_repo, repo_name, branch_name, &
                            move_mode, move_source_name, move_dest_selected)
 
-        ! Get input
-        read(*, '(a1)', advance='no') key
+        ! Get input (with error handling for End-of-record after Enter key)
+        read(*, '(a1)', advance='no', iostat=i) key
+        ! Only cycle on End-of-record (negative iostat), which happens after pressing Enter
+        ! Don't skip on positive errors or when we successfully read a character
+        if (i < 0) cycle  ! End-of-record - skip and try again
+        if (i > 0) cycle  ! Other read errors - skip and try again
 
         ! Handle input
         select case(ichar(key))
-        case(27)  ! ESC - arrow keys
+        case(27)  ! ESC - arrow keys or cancel move mode
             call read_arrow_key(key)
-            if (move_mode) then
+
+            ! If standalone ESC (not followed by '['), cancel move mode
+            if (key /= 'A' .and. key /= 'B' .and. key /= 'C' .and. key /= 'D' .and. key /= '[') then
+                if (move_mode) then
+                    move_mode = .false.
+                end if
+            else if (move_mode) then
                 ! In move mode, navigate directories only
                 select case(key)
                 case('A')  ! Up - jump to previous directory
@@ -196,12 +206,6 @@ program fortress
                         call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
                     end if
                 end select
-            end if
-        case(10, 13)  ! Enter - confirm move in move mode
-            if (move_mode) then
-                call execute_move_file(move_source_path, current_dir, current_files(move_dest_selected), &
-                                      current_is_dir(move_dest_selected))
-                move_mode = .false.
             end if
         case(113, 81)  ! 'q' or 'Q' - quit
             running = .false.
@@ -284,9 +288,11 @@ program fortress
             ! Reset selection to avoid going out of bounds
             selected = 1
             scroll_offset = 0
-        case(86, 118)  ! 'V' or 'v' - enter/exit move mode
+        case(86, 118)  ! 'V' or 'v' - enter move mode OR confirm move
             if (move_mode) then
-                ! Cancel move mode
+                ! Confirm move - execute the move to the white-highlighted directory
+                call execute_move_file(move_source_path, current_dir, current_files(move_dest_selected), &
+                                      current_is_dir(move_dest_selected))
                 move_mode = .false.
             else if (.not. current_is_dir(selected) .and. &
                      trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
@@ -294,9 +300,8 @@ program fortress
                 move_source_path = join_path(current_dir, current_files(selected))
                 move_source_name = current_files(selected)
                 move_mode = .true.
-                ! Find first directory for destination cursor (skip . and ..)
+                ! Find first directory for destination cursor
                 move_dest_selected = find_first_directory(current_files, current_is_dir, current_count)
-                ! Note: scroll adjustment will happen on next iteration, no need to set here
             end if
         end select
     end do
@@ -401,8 +406,7 @@ contains
         character(len=*), intent(in) :: source_path, dest_dir, dest_name
         logical, intent(in) :: is_dest_dir
         character(len=MAX_PATH*2) :: dest_path, mv_cmd
-        integer :: stat, ios
-        character(len=1) :: key
+        integer :: stat
 
         ! Build destination path
         if (is_dest_dir) then
@@ -421,14 +425,11 @@ contains
             dest_path = dest_dir
         end if
 
-        ! Execute move command
-        mv_cmd = "mv '" // trim(source_path) // "' '" // trim(dest_path) // "/' 2>&1"
+        ! Execute move command (mv will move file into dest_path directory)
+        mv_cmd = "mv '" // trim(source_path) // "' '" // trim(dest_path) // "'"
         call execute_command_line(trim(mv_cmd), exitstat=stat, wait=.true.)
 
-        ! Restore terminal to canonical mode for reading input
-        call execute_command_line("stty icanon echo 2>/dev/null")
-
-        ! Show result briefly
+        ! Show result briefly (no user input to avoid terminal state issues)
         write(output_unit, '(a)', advance='no') CLEAR
         write(output_unit, '(a)') BOLD // "Move Result" // RESET
         write(output_unit, *)
@@ -441,13 +442,9 @@ contains
             write(output_unit, '(a)') "  (file may already exist or invalid destination)"
         end if
         write(output_unit, *)
-        write(output_unit, '(a)') "Press any key to continue..."
 
-        ! Wait for keypress (ignore errors from Enter key)
-        read(*, '(a1)', iostat=ios) key
-
-        ! Restore raw mode
-        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+        ! Brief pause to let user see the result (use Fortran sleep to avoid stdin issues)
+        call sleep(2)
     end subroutine execute_move_file
 
 end program fortress

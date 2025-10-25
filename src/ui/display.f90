@@ -128,7 +128,7 @@ contains
         ! Footer
         if (move_mode) then
             write(output_unit, '(a)') RED // "MOVE MODE: " // RESET // &
-                                     DIM // "↑↓:next/prev dir →:enter dir ←:parent Enter:move here v/ESC:cancel" // RESET
+                                     DIM // "↑↓:next/prev dir →:enter dir ←:parent v:move here ESC:cancel" // RESET
         else if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
                                      DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename v:move .:hidden a:add u:unstage m:commit f:fetch l:pull p:push c:cd q:quit" // RESET
