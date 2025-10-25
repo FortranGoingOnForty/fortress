@@ -27,6 +27,12 @@ program fortress
     character(len=MAX_PATH) :: move_source_name
     integer :: move_dest_selected = 1
 
+    ! Clipboard state
+    logical :: has_clipboard = .false.
+    logical :: clipboard_is_cut = .false.  ! true = cut, false = copy
+    character(len=MAX_PATH) :: clipboard_source_path
+    character(len=MAX_PATH) :: clipboard_source_name
+
     character(len=1) :: key
     integer :: i, rows, cols, visible_height
 
@@ -126,7 +132,8 @@ program fortress
                            current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                            selected, parent_selected, scroll_offset, parent_scroll_offset, &
                            in_git_repo, repo_name, branch_name, &
-                           move_mode, move_source_name, move_dest_selected)
+                           move_mode, move_source_name, move_dest_selected, &
+                           has_clipboard, clipboard_is_cut, clipboard_source_name)
 
         ! Get input (with error handling for End-of-record after Enter key)
         read(*, '(a1)', advance='no', iostat=i) key
@@ -247,7 +254,7 @@ program fortress
             if (in_git_repo) then
                 call git_commit_prompt(current_dir, repo_name)
             end if
-        case(80, 112)  ! 'P' or 'p' - git push
+        case(72, 104)  ! 'H' or 'h' - git push (h for "push to remote Host")
             if (in_git_repo) then
                 call git_push_prompt(current_dir, repo_name)
             end if
@@ -300,6 +307,29 @@ program fortress
                 move_mode = .true.
                 ! Find first directory for destination cursor
                 move_dest_selected = find_first_directory(current_files, current_is_dir, current_count)
+            end if
+        case(89, 121)  ! 'Y' or 'y' - yank/copy to clipboard
+            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                clipboard_source_path = join_path(current_dir, current_files(selected))
+                clipboard_source_name = current_files(selected)
+                clipboard_is_cut = .false.
+                has_clipboard = .true.
+            end if
+        case(88, 120)  ! 'X' or 'x' - cut to clipboard
+            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                clipboard_source_path = join_path(current_dir, current_files(selected))
+                clipboard_source_name = current_files(selected)
+                clipboard_is_cut = .true.
+                has_clipboard = .true.
+            end if
+        case(80, 112)  ! 'P' or 'p' - paste from clipboard
+            if (has_clipboard) then
+                call execute_paste(clipboard_source_path, clipboard_is_cut, current_dir, &
+                                  current_files(selected), current_is_dir(selected))
+                ! Clear clipboard after cut operation
+                if (clipboard_is_cut) then
+                    has_clipboard = .false.
+                end if
             end if
         end select
     end do
@@ -444,5 +474,70 @@ contains
         ! Brief pause to let user see the result (use Fortran sleep to avoid stdin issues)
         call sleep(2)
     end subroutine execute_move_file
+
+    subroutine execute_paste(source_path, is_cut, dest_dir, dest_name, dest_is_dir)
+        use iso_fortran_env, only: output_unit
+        use terminal_control, only: CLEAR, GREEN, RED, RESET, BOLD, YELLOW
+        character(len=*), intent(in) :: source_path, dest_dir, dest_name
+        logical, intent(in) :: is_cut, dest_is_dir
+        character(len=MAX_PATH*2) :: dest_path, cmd
+        integer :: stat
+
+        ! Determine destination directory based on cursor position
+        if (dest_is_dir) then
+            if (trim(dest_name) == ".") then
+                ! Paste into current directory
+                dest_path = dest_dir
+            else if (trim(dest_name) == "..") then
+                ! Paste into parent directory
+                dest_path = get_parent_path(dest_dir)
+            else
+                ! Paste into the selected directory
+                dest_path = join_path(dest_dir, dest_name)
+            end if
+        else
+            ! Cursor is on a file - paste into current directory (next to the file)
+            dest_path = dest_dir
+        end if
+
+        ! Execute copy or move command
+        if (is_cut) then
+            ! Cut = move
+            cmd = "mv '" // trim(source_path) // "' '" // trim(dest_path) // "'"
+        else
+            ! Copy recursively (works for both files and directories)
+            cmd = "cp -r '" // trim(source_path) // "' '" // trim(dest_path) // "'"
+        end if
+        call execute_command_line(trim(cmd), exitstat=stat, wait=.true.)
+
+        ! Show result briefly
+        write(output_unit, '(a)', advance='no') CLEAR
+        if (is_cut) then
+            write(output_unit, '(a)') BOLD // "Cut Result" // RESET
+        else
+            write(output_unit, '(a)') BOLD // "Copy Result" // RESET
+        end if
+        write(output_unit, *)
+        if (stat == 0) then
+            if (is_cut) then
+                write(output_unit, '(a)') GREEN // "✓ Cut and pasted successfully!" // RESET
+            else
+                write(output_unit, '(a)') GREEN // "✓ Copied successfully!" // RESET
+            end if
+            write(output_unit, '(a)') "  From: " // trim(source_path)
+            write(output_unit, '(a)') "  To:   " // trim(dest_path)
+        else
+            if (is_cut) then
+                write(output_unit, '(a)') RED // "✗ Cut failed" // RESET
+            else
+                write(output_unit, '(a)') RED // "✗ Copy failed" // RESET
+            end if
+            write(output_unit, '(a)') "  (destination may already exist or be invalid)"
+        end if
+        write(output_unit, *)
+
+        ! Brief pause to let user see the result
+        call sleep(2)
+    end subroutine execute_paste
 
 end program fortress
