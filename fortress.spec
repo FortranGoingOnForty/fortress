@@ -1,5 +1,5 @@
 Name:           fortress
-Version:        0.9.2
+Version:        0.9.5
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -103,6 +103,15 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Sat Oct 19 2025 mfw <espadon@outlook.com> - 0.9.5-1
+- Add 'r' key to remove files
+- Add copy, cut, paste functionality
+- Recursive move for directories
+- Stage directories with move mode
+- Exit move mode with 'q'
+- Smart duplicate suffix on paste
+- Fix suffix concatenation
+
 * Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.9.2-1
 - Add 'n' key to rename files
 - Add '.' key to toggle dotfiles visibility
