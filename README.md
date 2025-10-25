@@ -92,18 +92,42 @@ fpm build --flag "-g -Wall -Wextra"
   - Dotfiles: Grey
   - Regular files: White
 - **Smooth scrolling** - viewport follows cursor automatically
-- **Fuzzy finding with fzf** - press 'f' to search recursively and jump to files
+- **Fuzzy finding with fzf** - press 's' to search recursively and jump to files
 - **CD on exit** - press 'c' to navigate your shell to selected directory
+- **Dotfiles toggle** - press '.' to show/hide dotfiles
+
+### File Operations
+- **Move mode** - press 'v' to enter move mode, navigate to destination, 'v' to confirm, 'q' to cancel
+- **Rename** - press 'n' to rename files or directories
+- **Open files** - press 'o' to open with default application (respects $EDITOR/$VISUAL)
+- **Clipboard operations** (vim-style):
+  - **Copy** - press 'y' to yank (copy) file/directory to clipboard
+  - **Cut** - press 'x' to cut file/directory to clipboard
+  - **Paste** - press 'p' to paste:
+    - On directory: pastes INTO that directory
+    - On file: pastes NEXT TO that file (into current directory)
+    - On ".": pastes into current directory
+    - On "..": pastes into parent directory
+  - Copy clipboard persists for multiple pastes
+  - Cut clipboard auto-clears after paste
+- **Works on files AND directories** - all operations support recursive directory handling
 
 ### Git Integration (inspired by fuss)
-- **Git status indicators**:
-  - `↑` (green) = Staged
-  - `✗` (red) = Modified/unstaged
-  - `✗` (grey) = Untracked
-- **Repo name in status bar** - shows current repo name
-- **Quick staging** - press 'A' to git add selected file
-- **Interactive commits** - press 'M' for commit message prompt
-- **Real-time updates** - indicators refresh after staging
+- **Recursive git status indicators**:
+  - `↑` (green) = Staged changes
+  - `✗` (red) = Modified/unstaged changes
+  - `✗` (grey) = Untracked files
+  - `↓` (yellow) = Incoming changes from remote
+  - **Directories show indicators** if they contain dirty files at any depth
+  - **Indicators persist** across subdirectory navigation
+- **Batch operations** - stage/unstage entire directories recursively
+- **Repo name and branch** in status bar
+- **Full git workflow**:
+  - Stage, unstage, commit, fetch, pull, push, tag
+  - View diffs with color output
+  - Incoming change detection
+- **Real-time updates** - indicators refresh after git operations
+- **Smart upstream handling** - interactive branch selection when no upstream configured
 
 ## Controls
 
@@ -111,14 +135,57 @@ fpm build --flag "-g -Wall -Wextra"
 - `↑/↓`: Navigate up/down
 - `→`: Enter directory
 - `←`: Go back to parent directory
-- `f`: Fuzzy find files with fzf (searches recursively)
+- `s`: Search files with fzf (fuzzy find recursively)
 - `c`: CD to selected directory and exit (requires shell integration)
-- `q`: Quit
+- `q`: Quit (or exit move mode if active)
+- `.`: Toggle dotfiles visibility
+
+### File Operations
+- `v`: Enter move mode / confirm move
+- `y`: Yank (copy) to clipboard
+- `x`: Cut to clipboard
+- `p`: Paste from clipboard
+- `n`: Rename file/directory
+- `o`: Open file with default application
 
 ### Git Commands (when in a git repository)
-- `A`: Stage selected file (git add)
-- `U`: Unstage selected file (git restore --staged)
-- `M`: Commit with message prompt (git commit -m)
+- `a`: Stage file/directory (batch stages directories recursively)
+- `u`: Unstage file/directory (batch unstages directories recursively)
+- `m`: Commit with message prompt
+- `d`: Show git diff for selected file
+- `f`: Fetch from remote
+- `l`: Pull from remote
+- `h`: Push to remote
+- `t`: Create git tag
+
+## Visual Feedback
+
+FORTRESS provides clear visual feedback for all operations:
+
+### Header Status
+- **Normal**: Shows current directory path
+- **Move mode**: Shows `MOVE: filename` in red
+- **Copy clipboard**: Shows `COPY: filename` in green
+- **Cut clipboard**: Shows `CUT: filename` in yellow
+
+### Move Mode
+When in move mode (press 'v'):
+- Source file/directory appears in **red bold**
+- Destination cursor has **white background**
+- Footer shows move mode controls
+- Press 'q' to cancel, 'v' to confirm
+
+### Clipboard Visual Feedback
+- **Copied files**: Normal appearance, shown in header as green `COPY: filename`
+- **Cut files**: Appear in **dark red** (dimmed) to indicate they will be moved
+- **Cut file selected**: Shows with **red background** instead of normal selection color
+- Visual indication persists until paste operation completes
+
+### Operation Feedback
+All file operations (move, copy, cut, paste, rename) display:
+- Success/failure status with ✓/✗ indicators
+- Source and destination paths
+- 2-second pause to review before returning to navigation
 
 ## License
 
