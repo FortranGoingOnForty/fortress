@@ -17,17 +17,26 @@ contains
         character(len=*), dimension(*), intent(out) :: files
         logical, dimension(*), intent(out) :: is_dir, is_exec
         integer, intent(out) :: count
-        integer :: unit, ios, stat
-        character(len=MAX_PATH) :: fullpath
+        integer :: unit, ios
+        character(len=MAX_PATH) :: temp_file, stat_file, fullpath
+        character(len=MAX_PATH) :: line, file_type
 
-        call execute_command_line("ls -1a '" // trim(dir) // "' > .fortress_ls 2>/dev/null", wait=.true.)
+        ! First get the list of files
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_ls"
+        stat_file = trim(temp_file) // "_stat"
 
-        open(newunit=unit, file=".fortress_ls", status='old', iostat=ios)
+        ! Get list of files with hidden files
+        call execute_command_line("ls -1a '" // trim(dir) // "' > " // trim(temp_file) // " 2>/dev/null", wait=.true.)
+
+        open(newunit=unit, file=temp_file, status='old', iostat=ios)
         if (ios /= 0) then
             count = 0
+            call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
             return
         end if
 
+        ! Read all filenames first
         count = 0
         do
             count = count + 1
@@ -37,22 +46,62 @@ contains
                 count = count - 1
                 exit
             end if
+        end do
+        close(unit)
 
-            fullpath = join_path(dir, files(count))
-            call execute_command_line("test -d '" // trim(fullpath) // "'", exitstat=stat, wait=.true.)
-            is_dir(count) = (stat == 0)
+        ! Now get file types using a single stat command for all files
+        ! Use find with -maxdepth 1 and -printf to get type info efficiently
+        call execute_command_line("cd '" // trim(dir) // "' && " // &
+            "find . -maxdepth 1 -name '.*' -o -name '*' | " // &
+            "while read f; do " // &
+            "  basename=""$f""; " // &
+            "  if [ -d ""$f"" ]; then echo ""$basename:d""; " // &
+            "  elif [ -x ""$f"" ]; then echo ""$basename:x""; " // &
+            "  else echo ""$basename:f""; fi; " // &
+            "done > " // trim(stat_file) // " 2>/dev/null", wait=.true.)
 
-            ! Check if executable (but not directories)
-            if (.not. is_dir(count)) then
-                call execute_command_line("test -x '" // trim(fullpath) // "'", exitstat=stat, wait=.true.)
-                is_exec(count) = (stat == 0)
-            else
-                is_exec(count) = .false.
-            end if
+        ! Initialize all as regular non-executable files
+        do ios = 1, count
+            is_dir(ios) = .false.
+            is_exec(ios) = .false.
         end do
 
-        close(unit)
-        call execute_command_line("rm -f .fortress_ls 2>/dev/null")
+        ! Read the stat results and update file types
+        open(newunit=unit, file=stat_file, status='old', iostat=ios)
+        if (ios == 0) then
+            do
+                read(unit, '(a)', iostat=ios) line
+                if (ios /= 0) exit
+
+                ! Parse "filename:type" format
+                ios = index(line, ':', back=.true.)
+                if (ios > 0) then
+                    fullpath = line(1:ios-1)
+                    file_type = line(ios+1:)
+
+                    ! Find this file in our list and update its type
+                    do ios = 1, count
+                        if (trim(files(ios)) == trim(fullpath)) then
+                            if (file_type == 'd') then
+                                is_dir(ios) = .true.
+                                is_exec(ios) = .false.
+                            else if (file_type == 'x') then
+                                is_dir(ios) = .false.
+                                is_exec(ios) = .true.
+                            else
+                                is_dir(ios) = .false.
+                                is_exec(ios) = .false.
+                            end if
+                            exit
+                        end if
+                    end do
+                end if
+            end do
+            close(unit)
+        end if
+
+        ! Cleanup temp files
+        call execute_command_line("rm -f " // trim(temp_file) // " " // trim(stat_file) // " 2>/dev/null")
     end subroutine get_file_list
 
     function get_pwd() result(path)

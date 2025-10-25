@@ -1,7 +1,7 @@
 module git_ops
     use iso_fortran_env, only: output_unit
     use terminal_control, only: GREEN, RED, GREY, RESET, BOLD, CLEAR
-    use filesystem_ops, only: MAX_PATH
+    use filesystem_ops, only: MAX_PATH, MAX_FILES
     implicit none
     private
 
@@ -9,6 +9,16 @@ module git_ops
     public :: git_add_file, git_unstage_file, git_commit_prompt
     public :: git_push_prompt, git_tag_prompt, prompt_upstream_selection
     public :: show_git_diff_fullscreen
+    public :: invalidate_git_cache
+
+    ! Cache variables for git status
+    logical :: cache_valid = .false.
+    character(len=MAX_PATH) :: cached_dir = ""
+    integer :: cache_timestamp = 0
+    integer :: cache_count = 0
+    character(len=MAX_PATH), dimension(MAX_FILES) :: cached_files
+    logical, dimension(MAX_FILES) :: cached_staged, cached_unstaged, cached_untracked
+    integer, parameter :: CACHE_TTL_MS = 500  ! Cache for 500ms
 
 contains
 
@@ -54,6 +64,48 @@ contains
         end if
     end subroutine detect_git_repo
 
+    subroutine invalidate_git_cache()
+        cache_valid = .false.
+    end subroutine invalidate_git_cache
+
+    integer function get_time_ms()
+        integer :: values(8)
+        call date_and_time(values=values)
+        ! Convert to milliseconds (rough approximation, good enough for cache)
+        get_time_ms = values(5)*3600000 + values(6)*60000 + values(7)*1000 + values(8)
+    end function get_time_ms
+
+    logical function is_cache_valid(dir, files, count)
+        character(len=*), intent(in) :: dir
+        character(len=*), dimension(*), intent(in) :: files
+        integer, intent(in) :: count
+        integer :: current_time, i
+        logical :: files_match
+
+        is_cache_valid = .false.
+
+        ! Check if cache exists and directory matches
+        if (.not. cache_valid .or. trim(cached_dir) /= trim(dir)) return
+
+        ! Check if cache is still fresh (within TTL)
+        current_time = get_time_ms()
+        if (abs(current_time - cache_timestamp) > CACHE_TTL_MS) return
+
+        ! Check if file list matches (quick count check first)
+        if (cache_count /= count) return
+
+        ! Verify files are the same
+        files_match = .true.
+        do i = 1, count
+            if (trim(cached_files(i)) /= trim(files(i))) then
+                files_match = .false.
+                exit
+            end if
+        end do
+
+        is_cache_valid = files_match
+    end function is_cache_valid
+
     subroutine get_git_status(dir, files, count, is_staged, is_unstaged, is_untracked)
         character(len=*), intent(in) :: dir
         character(len=*), dimension(*), intent(in) :: files
@@ -61,6 +113,17 @@ contains
         logical, dimension(*), intent(out) :: is_staged, is_unstaged, is_untracked
         character(len=MAX_PATH) :: temp_file, line, file_path, git_status
         integer :: unit, ios, stat, i
+
+        ! Check if we can use cached data
+        if (is_cache_valid(dir, files, count)) then
+            ! Use cached results
+            do i = 1, count
+                is_staged(i) = cached_staged(i)
+                is_unstaged(i) = cached_unstaged(i)
+                is_untracked(i) = cached_untracked(i)
+            end do
+            return
+        end if
 
         ! Initialize all to false
         do i = 1, count
@@ -104,6 +167,18 @@ contains
 
         close(unit)
         call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+
+        ! Update cache
+        cache_valid = .true.
+        cached_dir = dir
+        cache_timestamp = get_time_ms()
+        cache_count = count
+        do i = 1, count
+            cached_files(i) = files(i)
+            cached_staged(i) = is_staged(i)
+            cached_unstaged(i) = is_unstaged(i)
+            cached_untracked(i) = is_untracked(i)
+        end do
     end subroutine get_git_status
 
     subroutine write_git_indicators(staged, unstaged, untracked, highlighted)
@@ -141,6 +216,9 @@ contains
         ! Build git add command
         git_cmd = "cd '" // trim(dir) // "' && git add '" // trim(filename) // "' 2>/dev/null"
         call execute_command_line(trim(git_cmd), exitstat=stat, wait=.true.)
+
+        ! Invalidate cache after git operation
+        call invalidate_git_cache()
     end subroutine git_add_file
 
     subroutine git_unstage_file(dir, filename)
@@ -151,6 +229,9 @@ contains
         ! Build git restore --staged command
         git_cmd = "cd '" // trim(dir) // "' && git restore --staged '" // trim(filename) // "' 2>/dev/null"
         call execute_command_line(trim(git_cmd), exitstat=stat, wait=.true.)
+
+        ! Invalidate cache after git operation
+        call invalidate_git_cache()
     end subroutine git_unstage_file
 
     subroutine git_commit_prompt(dir, repo_name)

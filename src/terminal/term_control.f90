@@ -6,6 +6,7 @@ module terminal_control
     public :: get_term_size, setup_raw_mode, restore_terminal, read_arrow_key
     public :: ESC, CLEAR, BOLD, DIM, REVERSE, RESET
     public :: BLUE, GREEN, RED, GREY, WHITE
+    public :: invalidate_term_cache
 
     ! ANSI escape codes
     character(len=*), parameter :: ESC = char(27)
@@ -20,31 +21,65 @@ module terminal_control
     character(len=*), parameter :: GREY = ESC // "[90m"
     character(len=*), parameter :: WHITE = ESC // "[37m"
 
+    ! Terminal size cache
+    integer, save :: cached_rows = 0
+    integer, save :: cached_cols = 0
+    logical, save :: cache_valid = .false.
+    integer, save :: cache_counter = 0
+    integer, parameter :: CACHE_REFRESH_INTERVAL = 100  ! Refresh every 100 calls
+
 contains
+
+    subroutine invalidate_term_cache()
+        cache_valid = .false.
+    end subroutine invalidate_term_cache
 
     subroutine get_term_size(r, c)
         integer, intent(out) :: r, c
         integer :: unit, ios
+        character(len=256) :: temp_file
 
-        call execute_command_line("tput lines > .fortress_size 2>/dev/null", wait=.true.)
-        open(newunit=unit, file=".fortress_size", status='old', iostat=ios)
-        if (ios == 0) then
-            read(unit, *) r
-            close(unit)
-        else
-            r = 24
+        ! Increment counter for periodic refresh
+        cache_counter = cache_counter + 1
+
+        ! Use cache if valid and not time for refresh
+        if (cache_valid .and. cache_counter < CACHE_REFRESH_INTERVAL) then
+            r = cached_rows
+            c = cached_cols
+            return
         end if
 
-        call execute_command_line("tput cols > .fortress_size 2>/dev/null", wait=.true.)
-        open(newunit=unit, file=".fortress_size", status='old', iostat=ios)
+        ! Reset counter when refreshing
+        if (cache_counter >= CACHE_REFRESH_INTERVAL) cache_counter = 0
+
+        ! Get fresh terminal size using single command
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_size"
+
+        ! Get both dimensions in one command (more efficient)
+        call execute_command_line("echo ""$(tput lines) $(tput cols)"" > " // trim(temp_file) // " 2>/dev/null", wait=.true.)
+
+        open(newunit=unit, file=temp_file, status='old', iostat=ios)
         if (ios == 0) then
-            read(unit, *) c
+            read(unit, *, iostat=ios) r, c
             close(unit)
+            if (ios /= 0) then
+                ! Fallback to defaults if read fails
+                r = 24
+                c = 80
+            end if
         else
+            ! Fallback to defaults if file open fails
+            r = 24
             c = 80
         end if
 
-        call execute_command_line("rm -f .fortress_size 2>/dev/null")
+        call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+
+        ! Update cache
+        cached_rows = r
+        cached_cols = c
+        cache_valid = .true.
     end subroutine get_term_size
 
     subroutine setup_raw_mode()
