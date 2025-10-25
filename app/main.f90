@@ -203,6 +203,10 @@ program fortress
                     call open_file_in_default_app(join_path(current_dir, current_files(selected)))
                 end if
             end if
+        case(78, 110)  ! 'N' or 'n' - rename file/directory
+            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                call rename_file_prompt(current_dir, current_files(selected))
+            end if
         case(68, 100)  ! 'D' or 'd' - show git diff
             if (in_git_repo .and. .not. current_is_dir(selected)) then
                 if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
