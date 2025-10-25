@@ -482,6 +482,7 @@ contains
         logical, intent(in) :: is_cut, dest_is_dir
         character(len=MAX_PATH*2) :: dest_path, cmd, final_dest, base_name, extension
         character(len=MAX_PATH*2) :: test_path
+        character(len=10) :: suffix_str
         integer :: stat, suffix_num, ext_pos, name_len, ios
 
         ! Determine destination directory based on cursor position
@@ -531,11 +532,16 @@ contains
             ! Find next available suffix number
             suffix_num = 1
             do while (suffix_num < 1000)  ! Safety limit
+                ! Build the test path with suffix using concatenation
+                write(suffix_str, '(i0)') suffix_num
+
                 if (len_trim(extension) > 0) then
-                    write(test_path, '(3a,i0,a)') trim(dest_path), "/", base_name(1:name_len), &
-                                                   "-", suffix_num, trim(extension)
+                    ! With extension: filename-N.ext
+                    test_path = trim(dest_path) // "/" // base_name(1:name_len) // "-" // &
+                                trim(suffix_str) // trim(extension)
                 else
-                    write(test_path, '(3a,i0)') trim(dest_path), "/", trim(base_name), "-", suffix_num
+                    ! Without extension: filename-N
+                    test_path = trim(dest_path) // "/" // trim(base_name) // "-" // trim(suffix_str)
                 end if
 
                 ! Check if this suffixed name exists
