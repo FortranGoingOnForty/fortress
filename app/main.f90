@@ -20,6 +20,13 @@ program fortress
     character(len=256) :: repo_name, branch_name
     logical :: in_git_repo = .false., running = .true., cd_on_exit = .false.
     logical :: show_dotfiles = .true.
+
+    ! Move mode state
+    logical :: move_mode = .false.
+    character(len=MAX_PATH) :: move_source_path
+    character(len=MAX_PATH) :: move_source_name
+    integer :: move_dest_selected = 1
+
     character(len=1) :: key
     integer :: i, rows, cols, visible_height
 
@@ -74,20 +81,37 @@ program fortress
             scroll_offset = max(0, selected - visible_height / 2)
         end if
 
+        ! Handle move mode destination cursor
+        if (move_mode .and. move_dest_selected == -1) then
+            move_dest_selected = find_in_parent(temp_dir, current_files, current_count)
+        end if
+
         ! Bounds check
         if (current_count > 0) then
             selected = max(1, min(selected, current_count))
+            if (move_mode) then
+                move_dest_selected = max(1, min(move_dest_selected, current_count))
+            end if
         else
             selected = 1
+            if (move_mode) move_dest_selected = 1
         end if
 
         ! Find current dir in parent
         parent_selected = find_in_parent(current_dir, parent_files, parent_count)
 
         ! Adjust scroll to keep cursor visible
-        if (selected < scroll_offset + 1) scroll_offset = max(0, selected - 1)
-        if (selected > scroll_offset + visible_height) scroll_offset = selected - visible_height
-        scroll_offset = max(0, min(scroll_offset, max(0, current_count - visible_height)))
+        if (move_mode) then
+            ! In move mode, track the destination cursor
+            if (move_dest_selected < scroll_offset + 1) scroll_offset = max(0, move_dest_selected - 1)
+            if (move_dest_selected > scroll_offset + visible_height) scroll_offset = move_dest_selected - visible_height
+            scroll_offset = max(0, min(scroll_offset, max(0, current_count - visible_height)))
+        else
+            ! Normal mode, track the selection cursor
+            if (selected < scroll_offset + 1) scroll_offset = max(0, selected - 1)
+            if (selected > scroll_offset + visible_height) scroll_offset = selected - visible_height
+            scroll_offset = max(0, min(scroll_offset, max(0, current_count - visible_height)))
+        end if
 
         if (parent_selected > 0) then
             if (parent_selected < parent_scroll_offset + 1) parent_scroll_offset = max(0, parent_selected - 1)
@@ -101,7 +125,8 @@ program fortress
                            current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
                            current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                            selected, parent_selected, scroll_offset, parent_scroll_offset, &
-                           in_git_repo, repo_name, branch_name)
+                           in_git_repo, repo_name, branch_name, &
+                           move_mode, move_source_name, move_dest_selected)
 
         ! Get input
         read(*, '(a1)', advance='no') key
@@ -110,36 +135,74 @@ program fortress
         select case(ichar(key))
         case(27)  ! ESC - arrow keys
             call read_arrow_key(key)
-            select case(key)
-            case('A')  ! Up
-                if (selected > 1) selected = selected - 1
-            case('B')  ! Down
-                if (selected < current_count .and. current_count > 0) selected = selected + 1
-            case('C')  ! Right - enter directory
-                if (current_is_dir(selected)) then
-                    if (trim(current_files(selected)) == "..") then
+            if (move_mode) then
+                ! In move mode, navigate directories only
+                select case(key)
+                case('A')  ! Up - jump to previous directory
+                    move_dest_selected = find_prev_directory(current_files, current_is_dir, current_count, move_dest_selected)
+                case('B')  ! Down - jump to next directory
+                    move_dest_selected = find_next_directory(current_files, current_is_dir, current_count, move_dest_selected)
+                case('C')  ! Right - enter directory
+                    if (current_is_dir(move_dest_selected)) then
+                        if (trim(current_files(move_dest_selected)) == "..") then
+                            ! Don't descend into ..
+                        else if (trim(current_files(move_dest_selected)) /= ".") then
+                            ! Descend into directory
+                            parent_dir = current_dir
+                            current_dir = join_path(current_dir, current_files(move_dest_selected))
+                            move_dest_selected = find_first_directory(current_files, current_is_dir, current_count)
+                            scroll_offset = 0
+                            call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+                        end if
+                    end if
+                case('D')  ! Left - go to parent
+                    if (current_dir /= "/") then
+                        temp_dir = current_dir
+                        current_dir = parent_dir
+                        parent_dir = get_parent_path(current_dir)
+                        move_dest_selected = -1  ! Will be set to parent dir position
+                        call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+                    end if
+                end select
+            else
+                ! Normal navigation
+                select case(key)
+                case('A')  ! Up
+                    if (selected > 1) selected = selected - 1
+                case('B')  ! Down
+                    if (selected < current_count .and. current_count > 0) selected = selected + 1
+                case('C')  ! Right - enter directory
+                    if (current_is_dir(selected)) then
+                        if (trim(current_files(selected)) == "..") then
+                            temp_dir = current_dir
+                            current_dir = parent_dir
+                            parent_dir = get_parent_path(current_dir)
+                            selected = -1
+                            call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+                        else if (trim(current_files(selected)) /= ".") then
+                            parent_dir = current_dir
+                            current_dir = join_path(current_dir, current_files(selected))
+                            selected = 1
+                            scroll_offset = 0
+                            call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+                        end if
+                    end if
+                case('D')  ! Left - go back
+                    if (current_dir /= "/") then
                         temp_dir = current_dir
                         current_dir = parent_dir
                         parent_dir = get_parent_path(current_dir)
                         selected = -1
                         call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
-                    else if (trim(current_files(selected)) /= ".") then
-                        parent_dir = current_dir
-                        current_dir = join_path(current_dir, current_files(selected))
-                        selected = 1
-                        scroll_offset = 0
-                        call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
                     end if
-                end if
-            case('D')  ! Left - go back
-                if (current_dir /= "/") then
-                    temp_dir = current_dir
-                    current_dir = parent_dir
-                    parent_dir = get_parent_path(current_dir)
-                    selected = -1
-                    call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
-                end if
-            end select
+                end select
+            end if
+        case(10, 13)  ! Enter - confirm move in move mode
+            if (move_mode) then
+                call execute_move_file(move_source_path, current_dir, current_files(move_dest_selected), &
+                                      current_is_dir(move_dest_selected))
+                move_mode = .false.
+            end if
         case(113, 81)  ! 'q' or 'Q' - quit
             running = .false.
         case(99, 67)  ! 'c' or 'C' - cd to directory on exit
@@ -221,6 +284,20 @@ program fortress
             ! Reset selection to avoid going out of bounds
             selected = 1
             scroll_offset = 0
+        case(86, 118)  ! 'V' or 'v' - enter/exit move mode
+            if (move_mode) then
+                ! Cancel move mode
+                move_mode = .false.
+            else if (.not. current_is_dir(selected) .and. &
+                     trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                ! Enter move mode - store source file
+                move_source_path = join_path(current_dir, current_files(selected))
+                move_source_name = current_files(selected)
+                move_mode = .true.
+                ! Find first directory for destination cursor (skip . and ..)
+                move_dest_selected = find_first_directory(current_files, current_is_dir, current_count)
+                ! Note: scroll adjustment will happen on next iteration, no need to set here
+            end if
         end select
     end do
 
@@ -263,5 +340,108 @@ contains
         end do
         count = new_count
     end subroutine filter_dotfiles
+
+    function find_first_directory(files, is_dir, count) result(idx)
+        character(len=*), dimension(*), intent(in) :: files
+        logical, dimension(*), intent(in) :: is_dir
+        integer, intent(in) :: count
+        integer :: idx, i
+
+        ! Find first directory that isn't . or ..
+        do i = 1, count
+            if (is_dir(i) .and. trim(files(i)) /= "." .and. trim(files(i)) /= "..") then
+                idx = i
+                return
+            end if
+        end do
+
+        ! If no suitable directory found, default to first item
+        idx = 1
+    end function find_first_directory
+
+    function find_next_directory(files, is_dir, count, current) result(idx)
+        character(len=*), dimension(*), intent(in) :: files
+        logical, dimension(*), intent(in) :: is_dir
+        integer, intent(in) :: count, current
+        integer :: idx, i
+
+        ! Search forward from current position
+        do i = current + 1, count
+            if (is_dir(i) .and. trim(files(i)) /= "." .and. trim(files(i)) /= "..") then
+                idx = i
+                return
+            end if
+        end do
+
+        ! No directory found forward, stay at current
+        idx = current
+    end function find_next_directory
+
+    function find_prev_directory(files, is_dir, count, current) result(idx)
+        character(len=*), dimension(*), intent(in) :: files
+        logical, dimension(*), intent(in) :: is_dir
+        integer, intent(in) :: count, current
+        integer :: idx, i
+
+        ! Search backward from current position
+        do i = current - 1, 1, -1
+            if (is_dir(i) .and. trim(files(i)) /= "." .and. trim(files(i)) /= "..") then
+                idx = i
+                return
+            end if
+        end do
+
+        ! No directory found backward, stay at current
+        idx = current
+    end function find_prev_directory
+
+    subroutine execute_move_file(source_path, dest_dir, dest_name, is_dest_dir)
+        use iso_fortran_env, only: output_unit
+        use terminal_control, only: CLEAR, GREEN, RED, RESET, BOLD
+        character(len=*), intent(in) :: source_path, dest_dir, dest_name
+        logical, intent(in) :: is_dest_dir
+        character(len=MAX_PATH*2) :: dest_path, mv_cmd
+        integer :: stat, ios
+        character(len=1) :: key
+
+        ! Build destination path
+        if (is_dest_dir) then
+            if (trim(dest_name) == ".") then
+                ! Move to current directory
+                dest_path = dest_dir
+            else if (trim(dest_name) == "..") then
+                ! Move to parent directory
+                dest_path = get_parent_path(dest_dir)
+            else
+                ! Move into the selected directory
+                dest_path = join_path(dest_dir, dest_name)
+            end if
+        else
+            ! Not a directory - shouldn't happen due to our navigation, but handle it
+            dest_path = dest_dir
+        end if
+
+        ! Execute move command
+        mv_cmd = "mv '" // trim(source_path) // "' '" // trim(dest_path) // "/' 2>&1"
+        call execute_command_line(trim(mv_cmd), exitstat=stat, wait=.true.)
+
+        ! Show result briefly
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)') BOLD // "Move Result" // RESET
+        write(output_unit, *)
+        if (stat == 0) then
+            write(output_unit, '(a)') GREEN // "✓ File moved successfully!" // RESET
+            write(output_unit, '(a)') "  From: " // trim(source_path)
+            write(output_unit, '(a)') "  To:   " // trim(dest_path)
+        else
+            write(output_unit, '(a)') RED // "✗ Move failed" // RESET
+            write(output_unit, '(a)') "  (file may already exist or invalid destination)"
+        end if
+        write(output_unit, *)
+        write(output_unit, '(a)') "Press any key to continue..."
+
+        ! Wait for keypress
+        read(*, '(a1)', iostat=ios) key
+    end subroutine execute_move_file
 
 end program fortress

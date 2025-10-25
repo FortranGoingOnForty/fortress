@@ -14,7 +14,8 @@ contains
                               current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
                               current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                               selected, parent_selected, scroll_offset, parent_scroll_offset, &
-                              in_git_repo, repo_name, branch_name)
+                              in_git_repo, repo_name, branch_name, &
+                              move_mode, move_source_name, move_dest_selected)
         integer, intent(in) :: r, c, current_count, parent_count, selected, parent_selected
         integer, intent(in) :: scroll_offset, parent_scroll_offset
         character(len=*), intent(in) :: current_dir, repo_name, branch_name
@@ -23,7 +24,9 @@ contains
         logical, dimension(*), intent(in) :: current_is_exec, parent_is_exec
         logical, dimension(*), intent(in) :: current_is_staged, current_is_unstaged, current_is_untracked
         logical, dimension(*), intent(in) :: current_has_incoming
-        logical, intent(in) :: in_git_repo
+        logical, intent(in) :: in_git_repo, move_mode
+        character(len=*), intent(in) :: move_source_name
+        integer, intent(in) :: move_dest_selected
         integer :: left_w, i, parent_idx, current_idx, vis_h
         character(len=256) :: fname
         character(len=20) :: color_code
@@ -32,7 +35,12 @@ contains
         vis_h = r - 3  ! Visible height
 
         ! Header
-        write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir)
+        if (move_mode) then
+            write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
+                                     " | " // RED // "MOVE: " // trim(move_source_name) // RESET
+        else
+            write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir)
+        end if
 
         ! Files (render based on scroll offsets)
         do i = 1, vis_h
@@ -74,7 +82,23 @@ contains
                 ! Get color for current file
                 color_code = get_file_color(current_files(current_idx), current_is_dir(current_idx), current_is_exec(current_idx))
 
-                if (current_idx == selected) then
+                ! Move mode: show source in red, destination in white
+                if (move_mode .and. trim(current_files(current_idx)) == trim(move_source_name)) then
+                    ! Source file - show in RED
+                    write(output_unit, '(a)', advance='no') RED // BOLD // trim(fname) // RESET
+                    write(output_unit, '(a)') ""
+                else if (move_mode .and. current_idx == move_dest_selected) then
+                    ! Destination cursor - show with white background
+                    write(output_unit, '(a)', advance='no') REVERSE // WHITE // trim(fname)
+                    if (in_git_repo) then
+                        call write_git_indicators(current_is_staged(current_idx), &
+                                                  current_is_unstaged(current_idx), &
+                                                  current_is_untracked(current_idx), &
+                                                  current_has_incoming(current_idx), .true.)
+                    end if
+                    write(output_unit, '(a)') RESET
+                else if (current_idx == selected .and. .not. move_mode) then
+                    ! Normal selection (not in move mode)
                     write(output_unit, '(a)', advance='no') REVERSE // trim(color_code) // trim(fname)
                     ! Add git indicators if in repo
                     if (in_git_repo) then
@@ -85,6 +109,7 @@ contains
                     end if
                     write(output_unit, '(a)') RESET
                 else
+                    ! Normal rendering
                     write(output_unit, '(a)', advance='no') trim(color_code) // trim(fname)
                     ! Add git indicators if in repo
                     if (in_git_repo) then
@@ -101,11 +126,14 @@ contains
         end do
 
         ! Footer
-        if (in_git_repo) then
+        if (move_mode) then
+            write(output_unit, '(a)') RED // "MOVE MODE: " // RESET // &
+                                     DIM // "↑↓:next/prev dir →:enter dir ←:parent Enter:move here v/ESC:cancel" // RESET
+        else if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename .:hidden a:add u:unstage m:commit f:fetch l:pull p:push c:cd q:quit" // RESET
+                                     DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename v:move .:hidden a:add u:unstage m:commit f:fetch l:pull p:push c:cd q:quit" // RESET
         else
-            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename .:hidden c:cd q:quit" // RESET
+            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename v:move .:hidden c:cd q:quit" // RESET
         end if
     end subroutine draw_interface
 
