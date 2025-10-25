@@ -33,8 +33,21 @@ program fortress
     character(len=MAX_PATH) :: clipboard_source_path
     character(len=MAX_PATH) :: clipboard_source_name
 
+    ! Multi-select state
+    logical, dimension(MAX_FILES) :: is_selected
+    integer :: selection_count = 0
+    logical :: in_selection_mode = .false.
+    integer :: selection_anchor = -1  ! For shift+arrow block selection
+    logical :: has_disjoint_selection = .false.  ! True if non-contiguous items selected
+
+    ! Multi-clipboard for batch operations
+    character(len=MAX_PATH), dimension(MAX_FILES) :: clipboard_paths
+    character(len=MAX_PATH), dimension(MAX_FILES) :: clipboard_names
+    integer :: clipboard_count = 0
+
     character(len=1) :: key
     integer :: i, rows, cols, visible_height
+    logical :: is_shift_pressed
 
     ! Initialize
     current_dir = get_pwd()
@@ -54,12 +67,16 @@ program fortress
             call filter_dotfiles(parent_files, parent_is_dir, parent_is_exec, parent_count)
         end if
 
-        ! Initialize git arrays - only for actual file counts
+        ! Initialize git arrays and selection - only for actual file counts
         do i = 1, current_count
             current_is_staged(i) = .false.
             current_is_unstaged(i) = .false.
             current_is_untracked(i) = .false.
             current_has_incoming(i) = .false.
+            ! Keep selections if still in same directory, clear otherwise
+            if (i > MAX_FILES) then
+                is_selected(i) = .false.
+            end if
         end do
         do i = 1, parent_count
             parent_is_staged(i) = .false.
@@ -133,7 +150,8 @@ program fortress
                            selected, parent_selected, scroll_offset, parent_scroll_offset, &
                            in_git_repo, repo_name, branch_name, &
                            move_mode, move_source_name, move_dest_selected, &
-                           has_clipboard, clipboard_is_cut, clipboard_source_name)
+                           has_clipboard, clipboard_is_cut, clipboard_source_name, &
+                           is_selected, selection_count)
 
         ! Get input (with error handling for End-of-record after Enter key)
         read(*, '(a1)', advance='no', iostat=i) key
@@ -144,8 +162,8 @@ program fortress
 
         ! Handle input
         select case(ichar(key))
-        case(27)  ! ESC - arrow keys
-            call read_arrow_key(key)
+        case(27)  ! ESC - arrow keys or Shift+arrow keys
+            call read_arrow_key_with_shift(key, is_shift_pressed)
 
             if (move_mode) then
                 ! In move mode, navigate directories only
@@ -180,9 +198,37 @@ program fortress
                 ! Normal navigation
                 select case(key)
                 case('A')  ! Up
-                    if (selected > 1) selected = selected - 1
+                    if (is_shift_pressed .and. .not. has_disjoint_selection) then
+                        ! Shift+Up: Start or extend block selection upward
+                        if (selection_anchor == -1) then
+                            ! Start new block selection
+                            selection_anchor = selected
+                            call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                        end if
+                        if (selected > 1) selected = selected - 1
+                        ! Select range from anchor to current
+                        call select_range(is_selected, selection_count, selection_anchor, selected, current_count)
+                    else
+                        ! Normal up movement - clear anchor
+                        if (selected > 1) selected = selected - 1
+                        selection_anchor = -1
+                    end if
                 case('B')  ! Down
-                    if (selected < current_count .and. current_count > 0) selected = selected + 1
+                    if (is_shift_pressed .and. .not. has_disjoint_selection) then
+                        ! Shift+Down: Start or extend block selection downward
+                        if (selection_anchor == -1) then
+                            ! Start new block selection
+                            selection_anchor = selected
+                            call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                        end if
+                        if (selected < current_count .and. current_count > 0) selected = selected + 1
+                        ! Select range from anchor to current
+                        call select_range(is_selected, selection_count, selection_anchor, selected, current_count)
+                    else
+                        ! Normal down movement - clear anchor
+                        if (selected < current_count .and. current_count > 0) selected = selected + 1
+                        selection_anchor = -1
+                    end if
                 case('C')  ! Right - enter directory
                     if (current_is_dir(selected)) then
                         if (trim(current_files(selected)) == "..") then
@@ -190,12 +236,16 @@ program fortress
                             current_dir = parent_dir
                             parent_dir = get_parent_path(current_dir)
                             selected = -1
+                            selection_anchor = -1
+                            call clear_all_selections(is_selected, selection_count, in_selection_mode)
                             call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
                         else if (trim(current_files(selected)) /= ".") then
                             parent_dir = current_dir
                             current_dir = join_path(current_dir, current_files(selected))
                             selected = 1
                             scroll_offset = 0
+                            selection_anchor = -1
+                            call clear_all_selections(is_selected, selection_count, in_selection_mode)
                             call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
                         end if
                     end if
@@ -205,6 +255,8 @@ program fortress
                         current_dir = parent_dir
                         parent_dir = get_parent_path(current_dir)
                         selected = -1
+                        selection_anchor = -1
+                        call clear_all_selections(is_selected, selection_count, in_selection_mode)
                         call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
                     end if
                 end select
@@ -290,7 +342,13 @@ program fortress
                 end if
             end if
         case(82, 114)  ! 'R' or 'r' - delete/remove with confirmation
-            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+            if (selection_count > 0) then
+                ! Delete multiple selections
+                call delete_multi_with_confirmation(current_dir, current_files, current_is_dir, &
+                                                   is_selected, selection_count, current_count)
+                ! Clear selections after delete
+                call clear_all_selections(is_selected, selection_count, in_selection_mode)
+            else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                 call delete_with_confirmation(current_dir, current_files(selected), current_is_dir(selected))
             end if
         case(46)  ! '.' - toggle dotfiles visibility
@@ -298,6 +356,21 @@ program fortress
             ! Reset selection to avoid going out of bounds
             selected = 1
             scroll_offset = 0
+        case(32)  ! Space - toggle selection on current item
+            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                if (is_selected(selected)) then
+                    is_selected(selected) = .false.
+                    selection_count = selection_count - 1
+                else
+                    is_selected(selected) = .true.
+                    selection_count = selection_count + 1
+                    in_selection_mode = .true.
+                end if
+                ! Clear the selection anchor when toggling individual items
+                selection_anchor = -1
+                ! Check if we have disjoint selections
+                call check_disjoint_selection(is_selected, current_count, has_disjoint_selection)
+            end if
         case(86, 118)  ! 'V' or 'v' - enter move mode OR confirm move
             if (move_mode) then
                 ! Confirm move - execute the move to the white-highlighted directory
@@ -313,26 +386,73 @@ program fortress
                 move_dest_selected = find_first_directory(current_files, current_is_dir, current_count)
             end if
         case(89, 121)  ! 'Y' or 'y' - yank/copy to clipboard
-            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
-                clipboard_source_path = join_path(current_dir, current_files(selected))
-                clipboard_source_name = current_files(selected)
+            if (selection_count > 0) then
+                ! Copy multiple selections
+                clipboard_count = 0
+                do i = 1, current_count
+                    if (is_selected(i) .and. trim(current_files(i)) /= "." .and. &
+                        trim(current_files(i)) /= "..") then
+                        clipboard_count = clipboard_count + 1
+                        clipboard_paths(clipboard_count) = join_path(current_dir, current_files(i))
+                        clipboard_names(clipboard_count) = current_files(i)
+                    end if
+                end do
+                clipboard_is_cut = .false.
+                has_clipboard = .true.
+                ! Clear selections after copy
+                call clear_all_selections(is_selected, selection_count, in_selection_mode)
+            else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                ! Single item copy
+                clipboard_count = 1
+                clipboard_paths(1) = join_path(current_dir, current_files(selected))
+                clipboard_names(1) = current_files(selected)
+                clipboard_source_path = clipboard_paths(1)  ! For backward compatibility
+                clipboard_source_name = clipboard_names(1)
                 clipboard_is_cut = .false.
                 has_clipboard = .true.
             end if
         case(88, 120)  ! 'X' or 'x' - cut to clipboard
-            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
-                clipboard_source_path = join_path(current_dir, current_files(selected))
-                clipboard_source_name = current_files(selected)
+            if (selection_count > 0) then
+                ! Cut multiple selections
+                clipboard_count = 0
+                do i = 1, current_count
+                    if (is_selected(i) .and. trim(current_files(i)) /= "." .and. &
+                        trim(current_files(i)) /= "..") then
+                        clipboard_count = clipboard_count + 1
+                        clipboard_paths(clipboard_count) = join_path(current_dir, current_files(i))
+                        clipboard_names(clipboard_count) = current_files(i)
+                    end if
+                end do
+                clipboard_is_cut = .true.
+                has_clipboard = .true.
+                ! Clear selections after cut
+                call clear_all_selections(is_selected, selection_count, in_selection_mode)
+            else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                ! Single item cut
+                clipboard_count = 1
+                clipboard_paths(1) = join_path(current_dir, current_files(selected))
+                clipboard_names(1) = current_files(selected)
+                clipboard_source_path = clipboard_paths(1)  ! For backward compatibility
+                clipboard_source_name = clipboard_names(1)
                 clipboard_is_cut = .true.
                 has_clipboard = .true.
             end if
         case(80, 112)  ! 'P' or 'p' - paste from clipboard
             if (has_clipboard) then
-                call execute_paste(clipboard_source_path, clipboard_is_cut, current_dir, &
-                                  current_files(selected), current_is_dir(selected))
+                if (clipboard_count > 1) then
+                    ! Paste multiple items
+                    call execute_multi_paste(clipboard_paths, clipboard_names, clipboard_count, &
+                                            clipboard_is_cut, current_dir, current_files(selected), &
+                                            current_is_dir(selected))
+                else
+                    ! Single item paste (backward compatibility)
+                    call execute_paste(clipboard_paths(1), clipboard_is_cut, current_dir, &
+                                      current_files(selected), current_is_dir(selected))
+                end if
                 ! Clear clipboard after cut operation
                 if (clipboard_is_cut) then
                     has_clipboard = .false.
+                    clipboard_count = 0
                 end if
             end if
         end select
@@ -665,5 +785,295 @@ contains
             read(*, '(a1)', advance='no', iostat=ios) response
         end if
     end subroutine delete_with_confirmation
+
+    subroutine clear_all_selections(is_selected, selection_count, in_selection_mode)
+        logical, dimension(*), intent(inout) :: is_selected
+        integer, intent(inout) :: selection_count
+        logical, intent(inout) :: in_selection_mode
+        integer :: i
+
+        ! Clear all selections
+        do i = 1, MAX_FILES
+            is_selected(i) = .false.
+        end do
+        selection_count = 0
+        in_selection_mode = .false.
+    end subroutine clear_all_selections
+
+    subroutine check_disjoint_selection(is_selected, count, has_disjoint)
+        logical, dimension(*), intent(in) :: is_selected
+        integer, intent(in) :: count
+        logical, intent(out) :: has_disjoint
+        integer :: i, first_selected, last_selected
+
+        has_disjoint = .false.
+        first_selected = -1
+        last_selected = -1
+
+        ! Find first and last selected items
+        do i = 1, count
+            if (is_selected(i)) then
+                if (first_selected == -1) first_selected = i
+                last_selected = i
+            end if
+        end do
+
+        ! If we have a range, check if all items in range are selected
+        if (first_selected > 0 .and. last_selected > first_selected) then
+            do i = first_selected + 1, last_selected - 1
+                if (.not. is_selected(i)) then
+                    has_disjoint = .true.
+                    exit
+                end if
+            end do
+        end if
+    end subroutine check_disjoint_selection
+
+    subroutine select_range(is_selected, selection_count, anchor, cursor, count)
+        logical, dimension(*), intent(inout) :: is_selected
+        integer, intent(inout) :: selection_count
+        integer, intent(in) :: anchor, cursor, count
+        integer :: i, range_start, range_end
+
+        ! Determine range boundaries
+        range_start = min(anchor, cursor)
+        range_end = max(anchor, cursor)
+
+        ! Clear all selections first
+        do i = 1, count
+            is_selected(i) = .false.
+        end do
+
+        ! Select the range
+        selection_count = 0
+        do i = range_start, range_end
+            if (i >= 1 .and. i <= count) then
+                is_selected(i) = .true.
+                selection_count = selection_count + 1
+            end if
+        end do
+    end subroutine select_range
+
+    subroutine delete_multi_with_confirmation(dir, files, is_dir, is_selected, selection_count, count)
+        use iso_fortran_env, only: output_unit
+        use terminal_control, only: CLEAR, GREEN, RED, RESET, BOLD, YELLOW
+        character(len=*), intent(in) :: dir
+        character(len=*), dimension(*), intent(in) :: files
+        logical, dimension(*), intent(in) :: is_dir, is_selected
+        integer, intent(in) :: selection_count, count
+        character(len=MAX_PATH*2) :: full_path, rm_cmd
+        character(len=1) :: response
+        integer :: stat, ios, i, deleted_count
+
+        ! Clear screen and show confirmation prompt
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)') BOLD // "Delete Multiple Items" // RESET
+        write(output_unit, *)
+        write(output_unit, '(a)') YELLOW // "WARNING: You are about to delete " // &
+                                  trim(adjustl(itoa(selection_count))) // " items!" // RESET
+        write(output_unit, *)
+        write(output_unit, '(a)') "Selected items:"
+
+        ! List selected items (up to 10)
+        i = 0
+        do stat = 1, count
+            if (is_selected(stat)) then
+                i = i + 1
+                if (i <= 10) then
+                    if (is_dir(stat)) then
+                        write(output_unit, '(a)') "  [DIR]  " // trim(files(stat))
+                    else
+                        write(output_unit, '(a)') "  [FILE] " // trim(files(stat))
+                    end if
+                else if (i == 11) then
+                    write(output_unit, '(a)') "  ... and " // &
+                        trim(adjustl(itoa(selection_count - 10))) // " more"
+                    exit
+                end if
+            end if
+        end do
+
+        write(output_unit, *)
+        write(output_unit, '(a)', advance='no') RED // "Delete all selected items? (y/N): " // RESET
+
+        ! Read single character immediately
+        read(*, '(a1)', advance='no', iostat=ios) response
+
+        if (ios == 0 .and. (response == 'y' .or. response == 'Y')) then
+            ! User confirmed - proceed with deletion
+            deleted_count = 0
+
+            do i = 1, count
+                if (is_selected(i) .and. trim(files(i)) /= "." .and. trim(files(i)) /= "..") then
+                    full_path = join_path(dir, files(i))
+
+                    if (is_dir(i)) then
+                        rm_cmd = "rm -rf '" // trim(full_path) // "'"
+                    else
+                        rm_cmd = "rm -f '" // trim(full_path) // "'"
+                    end if
+
+                    call execute_command_line(trim(rm_cmd), exitstat=stat, wait=.true.)
+                    if (stat == 0) deleted_count = deleted_count + 1
+                end if
+            end do
+
+            ! Show result
+            write(output_unit, *)
+            write(output_unit, *)
+            if (deleted_count == selection_count) then
+                write(output_unit, '(a)') GREEN // "✓ All items deleted successfully!" // RESET
+            else if (deleted_count > 0) then
+                write(output_unit, '(a)') YELLOW // "⚠ Deleted " // &
+                    trim(adjustl(itoa(deleted_count))) // " of " // &
+                    trim(adjustl(itoa(selection_count))) // " items" // RESET
+            else
+                write(output_unit, '(a)') RED // "✗ Delete failed" // RESET
+            end if
+            write(output_unit, *)
+            write(output_unit, '(a)') "Press any key to continue..."
+
+            ! Wait for keypress
+            read(*, '(a1)', advance='no', iostat=ios) response
+        else
+            ! User cancelled
+            write(output_unit, *)
+            write(output_unit, *)
+            write(output_unit, '(a)') "Delete cancelled."
+            write(output_unit, *)
+            write(output_unit, '(a)') "Press any key to continue..."
+
+            ! Wait for keypress
+            read(*, '(a1)', advance='no', iostat=ios) response
+        end if
+    end subroutine delete_multi_with_confirmation
+
+    function itoa(n) result(str)
+        integer, intent(in) :: n
+        character(len=10) :: str
+        write(str, '(i0)') n
+    end function itoa
+
+    subroutine execute_multi_paste(paths, names, count, is_cut, dest_dir, dest_name, dest_is_dir)
+        use iso_fortran_env, only: output_unit
+        use terminal_control, only: CLEAR, GREEN, RED, RESET, BOLD, YELLOW
+        character(len=*), dimension(*), intent(in) :: paths, names
+        integer, intent(in) :: count
+        logical, intent(in) :: is_cut, dest_is_dir
+        character(len=*), intent(in) :: dest_dir, dest_name
+        character(len=MAX_PATH*2) :: dest_path, cmd, final_dest
+        integer :: i, stat, success_count
+        character(len=1) :: response
+
+        ! Determine destination directory
+        if (dest_is_dir) then
+            if (trim(dest_name) == ".") then
+                dest_path = dest_dir
+            else if (trim(dest_name) == "..") then
+                dest_path = get_parent_path(dest_dir)
+            else
+                dest_path = join_path(dest_dir, dest_name)
+            end if
+        else
+            dest_path = dest_dir
+        end if
+
+        ! Show operation preview
+        write(output_unit, '(a)', advance='no') CLEAR
+        if (is_cut) then
+            write(output_unit, '(a)') BOLD // "Multi-Cut Operation" // RESET
+        else
+            write(output_unit, '(a)') BOLD // "Multi-Copy Operation" // RESET
+        end if
+        write(output_unit, *)
+        write(output_unit, '(a)') "Pasting " // trim(adjustl(itoa(count))) // " items to:"
+        write(output_unit, '(a)') "  " // trim(dest_path)
+        write(output_unit, *)
+
+        success_count = 0
+
+        ! Process each item
+        do i = 1, count
+            ! Generate unique destination name if needed
+            call get_unique_dest_name(dest_path, names(i), final_dest)
+
+            ! Execute operation
+            if (is_cut) then
+                cmd = "mv '" // trim(paths(i)) // "' '" // trim(final_dest) // "'"
+            else
+                cmd = "cp -r '" // trim(paths(i)) // "' '" // trim(final_dest) // "'"
+            end if
+
+            call execute_command_line(trim(cmd), exitstat=stat, wait=.true.)
+
+            if (stat == 0) then
+                success_count = success_count + 1
+                write(output_unit, '(a)') GREEN // "  ✓ " // RESET // trim(names(i))
+            else
+                write(output_unit, '(a)') RED // "  ✗ " // RESET // trim(names(i))
+            end if
+        end do
+
+        ! Show summary
+        write(output_unit, *)
+        if (success_count == count) then
+            write(output_unit, '(a)') GREEN // "✓ All items processed successfully!" // RESET
+        else if (success_count > 0) then
+            write(output_unit, '(a)') YELLOW // "⚠ Processed " // &
+                trim(adjustl(itoa(success_count))) // " of " // &
+                trim(adjustl(itoa(count))) // " items" // RESET
+        else
+            write(output_unit, '(a)') RED // "✗ Operation failed" // RESET
+        end if
+        write(output_unit, *)
+        write(output_unit, '(a)') "Press any key to continue..."
+
+        ! Wait for keypress
+        read(*, '(a1)', advance='no', iostat=stat) response
+    end subroutine execute_multi_paste
+
+    subroutine get_unique_dest_name(dest_dir, base_name, unique_name)
+            character(len=*), intent(in) :: dest_dir, base_name
+            character(len=*), intent(out) :: unique_name
+            character(len=MAX_PATH*2) :: test_path
+            character(len=256) :: name_part, extension
+            character(len=10) :: suffix_str
+            integer :: ext_pos, suffix_num, stat
+
+            ! Initial destination
+            unique_name = join_path(dest_dir, base_name)
+
+            ! Check if exists
+            call execute_command_line("test -e '" // trim(unique_name) // "'", exitstat=stat, wait=.true.)
+            if (stat /= 0) return  ! Doesn't exist, we're good
+
+            ! Split name and extension
+            ext_pos = index(base_name, ".", back=.true.)
+            if (ext_pos > 1) then
+                name_part = base_name(1:ext_pos-1)
+                extension = base_name(ext_pos:)
+            else
+                name_part = base_name
+                extension = ""
+            end if
+
+            ! Find available suffix
+            do suffix_num = 1, 999
+                write(suffix_str, '(i0)') suffix_num
+                if (len_trim(extension) > 0) then
+                    test_path = trim(dest_dir) // "/" // trim(name_part) // "-" // &
+                               trim(suffix_str) // trim(extension)
+                else
+                    test_path = trim(dest_dir) // "/" // trim(name_part) // "-" // &
+                               trim(suffix_str)
+                end if
+
+                call execute_command_line("test -e '" // trim(test_path) // "'", exitstat=stat, wait=.true.)
+                if (stat /= 0) then
+                    unique_name = test_path
+                    exit
+                end if
+            end do
+    end subroutine get_unique_dest_name
 
 end program fortress
