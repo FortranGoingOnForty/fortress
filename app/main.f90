@@ -289,6 +289,10 @@ program fortress
                     end if
                 end if
             end if
+        case(82, 114)  ! 'R' or 'r' - delete/remove with confirmation
+            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                call delete_with_confirmation(current_dir, current_files(selected), current_is_dir(selected))
+            end if
         case(46)  ! '.' - toggle dotfiles visibility
             show_dotfiles = .not. show_dotfiles
             ! Reset selection to avoid going out of bounds
@@ -594,5 +598,72 @@ contains
         ! Brief pause to let user see the result
         call sleep(2)
     end subroutine execute_paste
+
+    subroutine delete_with_confirmation(dir, filename, is_dir)
+        use iso_fortran_env, only: output_unit
+        use terminal_control, only: CLEAR, GREEN, RED, RESET, BOLD, YELLOW
+        character(len=*), intent(in) :: dir, filename
+        logical, intent(in) :: is_dir
+        character(len=MAX_PATH*2) :: full_path, rm_cmd
+        character(len=1) :: response
+        integer :: stat, ios
+
+        ! Build full path
+        full_path = join_path(dir, filename)
+
+        ! Clear screen and show confirmation prompt
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)') BOLD // "Delete Confirmation" // RESET
+        write(output_unit, *)
+        if (is_dir) then
+            write(output_unit, '(a)') YELLOW // "WARNING: You are about to delete a directory!" // RESET
+            write(output_unit, '(a)') "Directory: " // trim(filename)
+        else
+            write(output_unit, '(a)') "File: " // trim(filename)
+        end if
+        write(output_unit, '(a)') "Path: " // trim(full_path)
+        write(output_unit, *)
+        write(output_unit, '(a)', advance='no') RED // "Are you sure? (y/N): " // RESET
+
+        ! Read single character immediately (no need to wait for Enter)
+        read(*, '(a1)', advance='no', iostat=ios) response
+
+        if (ios == 0 .and. (response == 'y' .or. response == 'Y')) then
+            ! User confirmed - proceed with deletion
+            if (is_dir) then
+                ! Delete directory recursively
+                rm_cmd = "rm -rf '" // trim(full_path) // "'"
+            else
+                ! Delete file
+                rm_cmd = "rm -f '" // trim(full_path) // "'"
+            end if
+
+            call execute_command_line(trim(rm_cmd), exitstat=stat, wait=.true.)
+
+            ! Show result
+            write(output_unit, *)
+            write(output_unit, *)
+            if (stat == 0) then
+                write(output_unit, '(a)') GREEN // "✓ Deleted successfully!" // RESET
+            else
+                write(output_unit, '(a)') RED // "✗ Delete failed" // RESET
+            end if
+            write(output_unit, *)
+            write(output_unit, '(a)') "Press any key to continue..."
+
+            ! Wait for keypress
+            read(*, '(a1)', advance='no', iostat=ios) response
+        else
+            ! User cancelled
+            write(output_unit, *)
+            write(output_unit, *)
+            write(output_unit, '(a)') "Delete cancelled."
+            write(output_unit, *)
+            write(output_unit, '(a)') "Press any key to continue..."
+
+            ! Wait for keypress
+            read(*, '(a1)', advance='no', iostat=ios) response
+        end if
+    end subroutine delete_with_confirmation
 
 end program fortress

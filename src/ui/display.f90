@@ -160,9 +160,9 @@ contains
                                      DIM // "↑↓:next/prev dir →:enter dir ←:parent v:move here q:cancel" // RESET
         else if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit f:fetch l:pull h:push c:cd q:quit" // RESET
+                                     DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
         else
-            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
+            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
         end if
     end subroutine draw_interface
 

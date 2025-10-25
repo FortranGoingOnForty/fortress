@@ -99,6 +99,10 @@ fpm build --flag "-g -Wall -Wextra"
 ### File Operations
 - **Move mode** - press 'v' to enter move mode, navigate to destination, 'v' to confirm, 'q' to cancel
 - **Rename** - press 'n' to rename files or directories
+- **Delete** - press 'r' to remove/delete with confirmation prompt
+  - Shows yellow warning for directories
+  - Requires explicit 'y' confirmation
+  - Handles both files and directories recursively
 - **Open files** - press 'o' to open with default application (respects $EDITOR/$VISUAL)
 - **Clipboard operations** (vim-style):
   - **Copy** - press 'y' to yank (copy) file/directory to clipboard
@@ -149,6 +153,7 @@ fpm build --flag "-g -Wall -Wextra"
 - `x`: Cut to clipboard
 - `p`: Paste from clipboard
 - `n`: Rename file/directory
+- `r`: Remove/delete file/directory (with confirmation)
 - `o`: Open file with default application
 
 ### Git Commands (when in a git repository)
