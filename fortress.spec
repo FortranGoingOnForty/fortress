@@ -1,5 +1,5 @@
 Name:           fortress
-Version:        0.9.0
+Version:        0.9.2
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -103,6 +103,15 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.9.2-1
+- Add 'n' key to rename files
+- Add '.' key to toggle dotfiles visibility
+- Add 'v' key to start move mode
+- Add git fetch/pull with incoming change indicators
+- Show dirty indicator on directories
+- Fix buffer issues in move mode
+- Various move behavior improvements
+
 * Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.9.0-1
 - Cache git operations for better performance
 - Optimize file attribute checking
