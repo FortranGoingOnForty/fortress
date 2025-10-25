@@ -347,15 +347,15 @@ contains
         integer, intent(in) :: count
         integer :: idx, i
 
-        ! Find first directory that isn't . or ..
+        ! Find first directory (including . and ..)
         do i = 1, count
-            if (is_dir(i) .and. trim(files(i)) /= "." .and. trim(files(i)) /= "..") then
+            if (is_dir(i)) then
                 idx = i
                 return
             end if
         end do
 
-        ! If no suitable directory found, default to first item
+        ! If no directory found, default to first item
         idx = 1
     end function find_first_directory
 
@@ -365,9 +365,9 @@ contains
         integer, intent(in) :: count, current
         integer :: idx, i
 
-        ! Search forward from current position
+        ! Search forward from current position (including . and ..)
         do i = current + 1, count
-            if (is_dir(i) .and. trim(files(i)) /= "." .and. trim(files(i)) /= "..") then
+            if (is_dir(i)) then
                 idx = i
                 return
             end if
@@ -383,9 +383,9 @@ contains
         integer, intent(in) :: count, current
         integer :: idx, i
 
-        ! Search backward from current position
+        ! Search backward from current position (including . and ..)
         do i = current - 1, 1, -1
-            if (is_dir(i) .and. trim(files(i)) /= "." .and. trim(files(i)) /= "..") then
+            if (is_dir(i)) then
                 idx = i
                 return
             end if
@@ -425,6 +425,9 @@ contains
         mv_cmd = "mv '" // trim(source_path) // "' '" // trim(dest_path) // "/' 2>&1"
         call execute_command_line(trim(mv_cmd), exitstat=stat, wait=.true.)
 
+        ! Restore terminal to canonical mode for reading input
+        call execute_command_line("stty icanon echo 2>/dev/null")
+
         ! Show result briefly
         write(output_unit, '(a)', advance='no') CLEAR
         write(output_unit, '(a)') BOLD // "Move Result" // RESET
@@ -440,8 +443,11 @@ contains
         write(output_unit, *)
         write(output_unit, '(a)') "Press any key to continue..."
 
-        ! Wait for keypress
+        ! Wait for keypress (ignore errors from Enter key)
         read(*, '(a1)', iostat=ios) key
+
+        ! Restore raw mode
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
     end subroutine execute_move_file
 
 end program fortress
