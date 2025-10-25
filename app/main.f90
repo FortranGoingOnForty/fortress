@@ -150,7 +150,7 @@ program fortress
                            selected, parent_selected, scroll_offset, parent_scroll_offset, &
                            in_git_repo, repo_name, branch_name, &
                            move_mode, move_source_name, move_dest_selected, &
-                           has_clipboard, clipboard_is_cut, clipboard_source_name, &
+                           has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
                            is_selected, selection_count)
 
         ! Get input (with error handling for End-of-record after Enter key)

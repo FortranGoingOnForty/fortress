@@ -16,7 +16,7 @@ contains
                               selected, parent_selected, scroll_offset, parent_scroll_offset, &
                               in_git_repo, repo_name, branch_name, &
                               move_mode, move_source_name, move_dest_selected, &
-                              has_clipboard, clipboard_is_cut, clipboard_source_name, &
+                              has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
                               is_selected, selection_count)
         integer, intent(in) :: r, c, current_count, parent_count, selected, parent_selected
         integer, intent(in) :: scroll_offset, parent_scroll_offset
@@ -31,6 +31,7 @@ contains
         integer, intent(in) :: move_dest_selected
         logical, intent(in) :: has_clipboard, clipboard_is_cut
         character(len=*), intent(in) :: clipboard_source_name
+        integer, intent(in) :: clipboard_count
         logical, dimension(*), intent(in) :: is_selected
         integer, intent(in) :: selection_count
         integer :: left_w, i, parent_idx, current_idx, vis_h
@@ -49,12 +50,24 @@ contains
             write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
                                      " | " // BLUE // trim(adjustl(itoa(selection_count))) // " selected" // RESET
         else if (has_clipboard) then
-            if (clipboard_is_cut) then
-                write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
-                                         " | " // YELLOW // "CUT: " // trim(clipboard_source_name) // RESET
+            if (clipboard_count > 1) then
+                ! Multiple items in clipboard
+                if (clipboard_is_cut) then
+                    write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
+                                             " | " // YELLOW // "CUT: " // trim(adjustl(itoa(clipboard_count))) // " items" // RESET
+                else
+                    write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
+                                             " | " // GREEN // "COPY: " // trim(adjustl(itoa(clipboard_count))) // " items" // RESET
+                end if
             else
-                write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
-                                         " | " // GREEN // "COPY: " // trim(clipboard_source_name) // RESET
+                ! Single item in clipboard
+                if (clipboard_is_cut) then
+                    write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
+                                             " | " // YELLOW // "CUT: " // trim(clipboard_source_name) // RESET
+                else
+                    write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
+                                             " | " // GREEN // "COPY: " // trim(clipboard_source_name) // RESET
+                end if
             end if
         else
             write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir)
@@ -101,7 +114,8 @@ contains
                 color_code = get_file_color(current_files(current_idx), current_is_dir(current_idx), current_is_exec(current_idx))
 
                 ! Check if this file is cut to clipboard (show in dark red)
-                if (has_clipboard .and. clipboard_is_cut .and. &
+                ! Only highlight for single-item cuts (multi-cuts shown in header)
+                if (has_clipboard .and. clipboard_is_cut .and. clipboard_count == 1 .and. &
                     trim(current_files(current_idx)) == trim(clipboard_source_name)) then
                     ! File is cut - show in dark red (dimmed red)
                     write(output_unit, '(a)', advance='no') DIM // RED // trim(fname)
@@ -130,7 +144,8 @@ contains
                 else if (current_idx == selected .and. .not. move_mode) then
                     ! Normal selection cursor (not in move mode)
                     ! If file is cut, show selected with red background instead of default color
-                    if (has_clipboard .and. clipboard_is_cut .and. &
+                    ! Only highlight for single-item cuts (multi-cuts shown in header)
+                    if (has_clipboard .and. clipboard_is_cut .and. clipboard_count == 1 .and. &
                         trim(current_files(current_idx)) == trim(clipboard_source_name)) then
                         write(output_unit, '(a)', advance='no') REVERSE // RED // trim(fname)
                     else
