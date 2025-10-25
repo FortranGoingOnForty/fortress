@@ -108,13 +108,15 @@ contains
         is_cache_valid = files_match
     end function is_cache_valid
 
-    subroutine get_git_status(dir, files, count, is_staged, is_unstaged, is_untracked)
+    subroutine get_git_status(dir, files, is_dir_arr, count, is_staged, is_unstaged, is_untracked)
         character(len=*), intent(in) :: dir
         character(len=*), dimension(*), intent(in) :: files
+        logical, dimension(*), intent(in) :: is_dir_arr
         integer, intent(in) :: count
         logical, dimension(*), intent(out) :: is_staged, is_unstaged, is_untracked
         character(len=MAX_PATH) :: temp_file, line, file_path, git_status
-        integer :: unit, ios, stat, i
+        character(len=MAX_PATH) :: repo_root, rel_path, full_status_path
+        integer :: unit, ios, stat, i, repo_root_len
 
         ! Check if we can use cached data
         if (is_cache_valid(dir, files, count)) then
@@ -134,10 +136,35 @@ contains
             is_untracked(i) = .false.
         end do
 
-        ! Get git status
+        ! Get repo root
         call get_environment_variable("HOME", temp_file)
-        temp_file = trim(temp_file) // "/.fortress_git_status"
-        call execute_command_line("cd '" // trim(dir) // "' && git status --porcelain 2>/dev/null > " // &
+        temp_file = trim(temp_file) // "/.fortress_repo_root"
+        call execute_command_line("git -C '" // trim(dir) // "' rev-parse --show-toplevel 2>/dev/null > " // &
+                                 trim(temp_file), exitstat=stat, wait=.true.)
+        if (stat /= 0) return
+
+        open(newunit=unit, file=temp_file, status='old', iostat=ios)
+        if (ios == 0) then
+            read(unit, '(a)', iostat=ios) repo_root
+            close(unit)
+        end if
+        call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+        if (ios /= 0) return
+
+        ! Calculate relative path from repo root to current directory
+        repo_root_len = len_trim(repo_root)
+        if (trim(dir) == trim(repo_root)) then
+            rel_path = ""
+        else if (len_trim(dir) > repo_root_len .and. dir(1:repo_root_len) == trim(repo_root)) then
+            ! Remove repo_root + "/" from dir
+            rel_path = dir(repo_root_len+2:)  ! +2 to skip the "/"
+        else
+            rel_path = ""
+        end if
+
+        ! Get git status from repo root
+        temp_file = trim(temp_file) // "_status"
+        call execute_command_line("cd '" // trim(repo_root) // "' && git status --porcelain 2>/dev/null > " // &
                                  trim(temp_file), exitstat=stat, wait=.true.)
 
         if (stat /= 0) return
@@ -152,16 +179,42 @@ contains
 
             if (len_trim(line) > 3) then
                 git_status = line(1:2)
-                file_path = trim(adjustl(line(4:)))
+                full_status_path = trim(adjustl(line(4:)))
 
-                ! Match against our file list
+                ! Check if this file is in our current directory or subdirectory
                 do i = 1, count
-                    if (trim(files(i)) == trim(file_path)) then
-                        ! Parse git status (XY format)
+                    ! Build expected path for this file
+                    if (len_trim(rel_path) > 0) then
+                        file_path = trim(rel_path) // "/" // trim(files(i))
+                    else
+                        file_path = trim(files(i))
+                    end if
+
+                    ! For files: exact match
+                    if (.not. is_dir_arr(i) .and. trim(full_status_path) == trim(file_path)) then
                         is_untracked(i) = (git_status == '??')
                         is_staged(i) = (git_status(1:1) /= ' ' .and. git_status(1:1) /= '?')
                         is_unstaged(i) = (git_status(2:2) /= ' ' .and. .not. is_untracked(i))
                         exit
+                    end if
+
+                    ! For directories: check if status path starts with dirname/
+                    if (is_dir_arr(i) .and. trim(files(i)) /= "." .and. trim(files(i)) /= "..") then
+                        ! Build directory path
+                        if (len_trim(rel_path) > 0) then
+                            file_path = trim(rel_path) // "/" // trim(files(i)) // "/"
+                        else
+                            file_path = trim(files(i)) // "/"
+                        end if
+
+                        ! Check if status path starts with this directory
+                        if (len_trim(full_status_path) >= len_trim(file_path) .and. &
+                            full_status_path(1:len_trim(file_path)) == trim(file_path)) then
+                            ! This directory contains dirty files
+                            is_untracked(i) = is_untracked(i) .or. (git_status == '??')
+                            is_staged(i) = is_staged(i) .or. (git_status(1:1) /= ' ' .and. git_status(1:1) /= '?')
+                            is_unstaged(i) = is_unstaged(i) .or. (git_status(2:2) /= ' ' .and. git_status /= '??')
+                        end if
                     end if
                 end do
             end if

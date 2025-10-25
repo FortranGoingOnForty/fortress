@@ -63,7 +63,7 @@ program fortress
 
         ! Get git status if in a repo
         if (in_git_repo) then
-            call get_git_status(current_dir, current_files, current_count, &
+            call get_git_status(current_dir, current_files, current_is_dir, current_count, &
                                current_is_staged, current_is_unstaged, current_is_untracked)
             call mark_incoming_changes(current_dir, current_files, current_count, current_has_incoming)
         end if
