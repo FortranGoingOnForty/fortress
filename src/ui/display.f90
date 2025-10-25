@@ -11,8 +11,8 @@ module ui_display
 contains
 
     subroutine draw_interface(r, c, current_dir, current_files, current_is_dir, current_is_exec, &
-                              current_is_staged, current_is_unstaged, current_is_untracked, current_count, &
-                              parent_files, parent_is_dir, parent_is_exec, parent_count, &
+                              current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
+                              current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                               selected, parent_selected, scroll_offset, parent_scroll_offset, &
                               in_git_repo, repo_name, branch_name)
         integer, intent(in) :: r, c, current_count, parent_count, selected, parent_selected
@@ -22,6 +22,7 @@ contains
         logical, dimension(*), intent(in) :: current_is_dir, parent_is_dir
         logical, dimension(*), intent(in) :: current_is_exec, parent_is_exec
         logical, dimension(*), intent(in) :: current_is_staged, current_is_unstaged, current_is_untracked
+        logical, dimension(*), intent(in) :: current_has_incoming
         logical, intent(in) :: in_git_repo
         integer :: left_w, i, parent_idx, current_idx, vis_h
         character(len=256) :: fname
@@ -79,7 +80,8 @@ contains
                     if (in_git_repo) then
                         call write_git_indicators(current_is_staged(current_idx), &
                                                   current_is_unstaged(current_idx), &
-                                                  current_is_untracked(current_idx), .true.)
+                                                  current_is_untracked(current_idx), &
+                                                  current_has_incoming(current_idx), .true.)
                     end if
                     write(output_unit, '(a)') RESET
                 else
@@ -88,7 +90,8 @@ contains
                     if (in_git_repo) then
                         call write_git_indicators(current_is_staged(current_idx), &
                                                   current_is_unstaged(current_idx), &
-                                                  current_is_untracked(current_idx), .false.)
+                                                  current_is_untracked(current_idx), &
+                                                  current_has_incoming(current_idx), .false.)
                     end if
                     write(output_unit, '(a)') RESET
                 end if
@@ -100,9 +103,9 @@ contains
         ! Footer
         if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "↑↓:nav →:enter ←:back f:find o:open d:diff A:add U:unstage M:commit P:push T:tag c:cd q:quit" // RESET
+                                     DIM // "↑↓:nav →:enter ←:back s:search o:open d:diff a:add u:unstage m:commit f:fetch l:pull p:push t:tag c:cd q:quit" // RESET
         else
-            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back f:find o:open c:cd q:quit" // RESET
+            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back s:search o:open c:cd q:quit" // RESET
         end if
     end subroutine draw_interface
 

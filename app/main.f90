@@ -13,6 +13,7 @@ program fortress
     logical, dimension(MAX_FILES) :: current_is_exec, parent_is_exec
     logical, dimension(MAX_FILES) :: current_is_staged, current_is_unstaged, current_is_untracked
     logical, dimension(MAX_FILES) :: parent_is_staged, parent_is_unstaged, parent_is_untracked
+    logical, dimension(MAX_FILES) :: current_has_incoming
     integer :: current_count, parent_count
     integer :: selected = 1, parent_selected = -1
     integer :: scroll_offset = 0, parent_scroll_offset = 0
@@ -38,6 +39,7 @@ program fortress
             current_is_staged(i) = .false.
             current_is_unstaged(i) = .false.
             current_is_untracked(i) = .false.
+            current_has_incoming(i) = .false.
         end do
         do i = 1, parent_count
             parent_is_staged(i) = .false.
@@ -49,6 +51,7 @@ program fortress
         if (in_git_repo) then
             call get_git_status(current_dir, current_files, current_count, &
                                current_is_staged, current_is_unstaged, current_is_untracked)
+            call mark_incoming_changes(current_dir, current_files, current_count, current_has_incoming)
         end if
 
         ! Get terminal size
@@ -88,8 +91,8 @@ program fortress
         ! Draw
         write(output_unit, '(a)', advance='no') CLEAR
         call draw_interface(rows, cols, current_dir, current_files, current_is_dir, current_is_exec, &
-                           current_is_staged, current_is_unstaged, current_is_untracked, current_count, &
-                           parent_files, parent_is_dir, parent_is_exec, parent_count, &
+                           current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
+                           current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                            selected, parent_selected, scroll_offset, parent_scroll_offset, &
                            in_git_repo, repo_name, branch_name)
 
@@ -144,7 +147,7 @@ program fortress
                 cd_on_exit = .true.
                 running = .false.
             end if
-        case(102, 70)  ! 'f' or 'F' - fzf search
+        case(83, 115)  ! 'S' or 's' - fzf search (moved from 'f')
             call fzf_search(current_dir, temp_dir)
             if (len_trim(temp_dir) > 0) then
                 parent_dir = get_parent_path(temp_dir)
@@ -178,6 +181,14 @@ program fortress
         case(84, 116)  ! 'T' or 't' - git tag
             if (in_git_repo) then
                 call git_tag_prompt(current_dir, repo_name)
+            end if
+        case(70, 102)  ! 'F' or 'f' - git fetch
+            if (in_git_repo) then
+                call git_fetch_prompt(current_dir, repo_name)
+            end if
+        case(76, 108)  ! 'L' or 'l' - git pull
+            if (in_git_repo) then
+                call git_pull_prompt(current_dir, repo_name)
             end if
         case(79, 111)  ! 'O' or 'o' - open file
             if (.not. current_is_dir(selected)) then

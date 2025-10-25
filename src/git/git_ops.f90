@@ -1,6 +1,6 @@
 module git_ops
     use iso_fortran_env, only: output_unit
-    use terminal_control, only: GREEN, RED, GREY, RESET, BOLD, CLEAR
+    use terminal_control, only: GREEN, RED, GREY, YELLOW, RESET, BOLD, CLEAR
     use filesystem_ops, only: MAX_PATH, MAX_FILES
     implicit none
     private
@@ -10,6 +10,8 @@ module git_ops
     public :: git_push_prompt, git_tag_prompt, prompt_upstream_selection
     public :: show_git_diff_fullscreen
     public :: invalidate_git_cache
+    public :: git_fetch_prompt, git_pull_prompt
+    public :: mark_incoming_changes
 
     ! Cache variables for git status
     logical :: cache_valid = .false.
@@ -181,8 +183,8 @@ contains
         end do
     end subroutine get_git_status
 
-    subroutine write_git_indicators(staged, unstaged, untracked, highlighted)
-        logical, intent(in) :: staged, unstaged, untracked, highlighted
+    subroutine write_git_indicators(staged, unstaged, untracked, has_incoming, highlighted)
+        logical, intent(in) :: staged, unstaged, untracked, has_incoming, highlighted
 
         ! Write indicators without RESET (caller handles that)
         if (staged) then
@@ -204,6 +206,13 @@ contains
                 write(output_unit, '(a)', advance='no') GREY // " ✗"
             else
                 write(output_unit, '(a)', advance='no') GREY // " ✗" // RESET
+            end if
+        end if
+        if (has_incoming) then
+            if (highlighted) then
+                write(output_unit, '(a)', advance='no') YELLOW // " ↓"
+            else
+                write(output_unit, '(a)', advance='no') YELLOW // " ↓" // RESET
             end if
         end if
     end subroutine write_git_indicators
@@ -480,5 +489,164 @@ contains
         call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
         read(*, '(a1)', advance='no') key
     end subroutine show_git_diff_fullscreen
+
+    subroutine git_fetch_prompt(dir, repo_name)
+        character(len=*), intent(in) :: dir, repo_name
+        character(len=1) :: key
+        integer :: stat
+        logical :: upstream_set
+
+        ! Clear screen and show prompt
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)', advance='no') BOLD // "Git Fetch" // RESET // " - " // trim(repo_name)
+        write(output_unit, *)
+        write(output_unit, *)
+
+        ! Check if upstream is configured
+        call execute_command_line("cd '" // trim(dir) // "' && git rev-parse --abbrev-ref @{upstream} " // &
+                                 "> /dev/null 2>&1", exitstat=stat, wait=.true.)
+
+        if (stat /= 0) then
+            ! No upstream configured - prompt user to select one
+            call prompt_upstream_selection(dir, upstream_set)
+            if (.not. upstream_set) return
+            ! Clear screen again after upstream selection
+            write(output_unit, '(a)', advance='no') CLEAR
+            write(output_unit, '(a)', advance='no') BOLD // "Git Fetch" // RESET // " - " // trim(repo_name)
+            write(output_unit, *)
+            write(output_unit, *)
+        end if
+
+        write(output_unit, '(a)') "Fetching from remote..."
+        write(output_unit, *)
+
+        ! Execute git fetch
+        call execute_command_line("cd '" // trim(dir) // "' && git fetch 2>&1", exitstat=stat, wait=.true.)
+
+        ! Show result
+        write(output_unit, *)
+        if (stat == 0) then
+            write(output_unit, '(a)') GREEN // "✓ Fetch completed!" // RESET
+        else
+            write(output_unit, '(a)') RED // "✗ Fetch failed" // RESET
+        end if
+        write(output_unit, '(a)') "Press any key to continue..."
+
+        ! Wait for keypress
+        read(*, '(a1)', advance='no') key
+
+        ! Invalidate git cache after fetch
+        call invalidate_git_cache()
+    end subroutine git_fetch_prompt
+
+    subroutine git_pull_prompt(dir, repo_name)
+        character(len=*), intent(in) :: dir, repo_name
+        character(len=1) :: key
+        integer :: stat
+        logical :: upstream_set
+
+        ! Clear screen and show prompt
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)', advance='no') BOLD // "Git Pull" // RESET // " - " // trim(repo_name)
+        write(output_unit, *)
+        write(output_unit, *)
+
+        ! Check if upstream is configured
+        call execute_command_line("cd '" // trim(dir) // "' && git rev-parse --abbrev-ref @{upstream} " // &
+                                 "> /dev/null 2>&1", exitstat=stat, wait=.true.)
+
+        if (stat /= 0) then
+            ! No upstream configured - prompt user to select one
+            call prompt_upstream_selection(dir, upstream_set)
+            if (.not. upstream_set) return
+            ! Clear screen again after upstream selection
+            write(output_unit, '(a)', advance='no') CLEAR
+            write(output_unit, '(a)', advance='no') BOLD // "Git Pull" // RESET // " - " // trim(repo_name)
+            write(output_unit, *)
+            write(output_unit, *)
+        end if
+
+        write(output_unit, '(a)') "Pulling from remote..."
+        write(output_unit, *)
+
+        ! Execute git pull
+        call execute_command_line("cd '" // trim(dir) // "' && git pull 2>&1", exitstat=stat, wait=.true.)
+
+        ! Show result
+        write(output_unit, *)
+        if (stat == 0) then
+            write(output_unit, '(a)') GREEN // "✓ Pull completed!" // RESET
+        else
+            write(output_unit, '(a)') RED // "✗ Pull failed" // RESET
+        end if
+        write(output_unit, '(a)') "Press any key to continue..."
+
+        ! Wait for keypress
+        read(*, '(a1)', advance='no') key
+
+        ! Invalidate git cache after pull
+        call invalidate_git_cache()
+    end subroutine git_pull_prompt
+
+    subroutine mark_incoming_changes(dir, files, count, has_incoming)
+        character(len=*), intent(in) :: dir
+        character(len=*), dimension(*), intent(in) :: files
+        integer, intent(in) :: count
+        logical, dimension(*), intent(out) :: has_incoming
+        character(len=MAX_PATH) :: temp_file, line, incoming_path
+        integer :: unit, ios, stat, i
+
+        ! Initialize all to false
+        do i = 1, count
+            has_incoming(i) = .false.
+        end do
+
+        ! Check if there's an upstream branch configured
+        ! Don't prompt - this is called automatically during refresh
+        call execute_command_line("cd '" // trim(dir) // "' && git rev-parse --abbrev-ref @{upstream} " // &
+                                 "> /dev/null 2>&1", exitstat=stat, wait=.true.)
+        if (stat /= 0) then
+            ! No upstream configured - silently return
+            return
+        end if
+
+        ! Get list of files that differ between HEAD and upstream
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_incoming"
+        call execute_command_line("cd '" // trim(dir) // "' && " // &
+                                 "git diff --name-only HEAD...@{upstream} > " // trim(temp_file) // " 2>/dev/null", &
+                                 exitstat=stat, wait=.true.)
+
+        if (stat /= 0) then
+            ! If diff fails, no incoming changes
+            call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+            return
+        end if
+
+        open(newunit=unit, file=temp_file, status='old', iostat=ios)
+        if (ios /= 0) then
+            call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+            return
+        end if
+
+        do
+            read(unit, '(a)', iostat=ios) line
+            if (ios /= 0) exit
+
+            if (len_trim(line) > 0) then
+                incoming_path = trim(line)
+                ! Mark this file as having incoming changes
+                do i = 1, count
+                    if (trim(files(i)) == trim(incoming_path)) then
+                        has_incoming(i) = .true.
+                        exit
+                    end if
+                end do
+            end if
+        end do
+
+        close(unit)
+        call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
+    end subroutine mark_incoming_changes
 
 end module git_ops

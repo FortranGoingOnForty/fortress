@@ -5,7 +5,7 @@ module terminal_control
 
     public :: get_term_size, setup_raw_mode, restore_terminal, read_arrow_key
     public :: ESC, CLEAR, BOLD, DIM, REVERSE, RESET
-    public :: BLUE, GREEN, RED, GREY, WHITE
+    public :: BLUE, GREEN, RED, GREY, WHITE, YELLOW
     public :: invalidate_term_cache
 
     ! ANSI escape codes
@@ -20,6 +20,7 @@ module terminal_control
     character(len=*), parameter :: RED = ESC // "[31m"
     character(len=*), parameter :: GREY = ESC // "[90m"
     character(len=*), parameter :: WHITE = ESC // "[37m"
+    character(len=*), parameter :: YELLOW = ESC // "[33m"
 
     ! Terminal size cache
     integer, save :: cached_rows = 0
