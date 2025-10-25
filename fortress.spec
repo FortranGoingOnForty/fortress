@@ -1,5 +1,5 @@
 Name:           fortress
-Version:        0.8.0
+Version:        0.9.0
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -103,6 +103,12 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.9.0-1
+- Cache git operations for better performance
+- Optimize file attribute checking
+- Fix directory entry navigation on arrow keys
+- Work in progress: diff keybinding
+
 * Fri Oct 18 2025 mfw <espadon@outlook.com> - 0.8.0-1
 - Add 'o' key to open files with $EDITOR
 - Platform-dependent features
