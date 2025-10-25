@@ -207,7 +207,8 @@ program fortress
                         end if
                         if (selected > 1) selected = selected - 1
                         ! Select range from anchor to current
-                        call select_range(is_selected, selection_count, selection_anchor, selected, current_count)
+                        call select_range(is_selected, selection_count, selection_anchor, selected, &
+                                         current_files, current_count)
                     else
                         ! Normal up movement - clear anchor
                         if (selected > 1) selected = selected - 1
@@ -223,7 +224,8 @@ program fortress
                         end if
                         if (selected < current_count .and. current_count > 0) selected = selected + 1
                         ! Select range from anchor to current
-                        call select_range(is_selected, selection_count, selection_anchor, selected, current_count)
+                        call select_range(is_selected, selection_count, selection_anchor, selected, &
+                                         current_files, current_count)
                     else
                         ! Normal down movement - clear anchor
                         if (selected < current_count .and. current_count > 0) selected = selected + 1
@@ -829,10 +831,11 @@ contains
         end if
     end subroutine check_disjoint_selection
 
-    subroutine select_range(is_selected, selection_count, anchor, cursor, count)
+    subroutine select_range(is_selected, selection_count, anchor, cursor, files, count)
         logical, dimension(*), intent(inout) :: is_selected
         integer, intent(inout) :: selection_count
         integer, intent(in) :: anchor, cursor, count
+        character(len=*), dimension(*), intent(in) :: files
         integer :: i, range_start, range_end
 
         ! Determine range boundaries
@@ -844,12 +847,15 @@ contains
             is_selected(i) = .false.
         end do
 
-        ! Select the range
+        ! Select the range, skipping "." and ".."
         selection_count = 0
         do i = range_start, range_end
             if (i >= 1 .and. i <= count) then
-                is_selected(i) = .true.
-                selection_count = selection_count + 1
+                ! Skip special directories "." and ".."
+                if (trim(files(i)) /= "." .and. trim(files(i)) /= "..") then
+                    is_selected(i) = .true.
+                    selection_count = selection_count + 1
+                end if
             end if
         end do
     end subroutine select_range

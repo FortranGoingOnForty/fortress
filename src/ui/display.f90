@@ -176,11 +176,16 @@ contains
         if (move_mode) then
             write(output_unit, '(a)') RED // "MOVE MODE: " // RESET // &
                                      DIM // "↑↓:next/prev dir →:enter dir ←:parent v:move here q:cancel" // RESET
+        else if (selection_count > 0) then
+            ! Selection mode footer - show multi-select help
+            write(output_unit, '(a)') BLUE // "MULTI-SELECT: " // RESET // &
+                                     DIM // "Space:toggle Shift+↑↓:block select y:copy x:cut p:paste r:delete | " // RESET // &
+                                     DIM // "→:enter ←:back c:cd q:quit" // RESET
         else if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
+                                     DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
         else
-            write(output_unit, '(a)') DIM // "↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
+            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
         end if
 
     contains
