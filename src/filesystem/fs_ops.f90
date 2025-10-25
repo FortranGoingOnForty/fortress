@@ -17,16 +17,15 @@ contains
         character(len=*), dimension(*), intent(out) :: files
         logical, dimension(*), intent(out) :: is_dir, is_exec
         integer, intent(out) :: count
-        integer :: unit, ios
-        character(len=MAX_PATH) :: temp_file, stat_file, fullpath
-        character(len=MAX_PATH) :: line, file_type
+        integer :: unit, ios, i, stat_code
+        character(len=MAX_PATH) :: temp_file, stat_file
+        character(len=MAX_PATH) :: line, filename, file_type, fullpath
 
-        ! First get the list of files
+        ! Get list of files
         call get_environment_variable("HOME", temp_file)
         temp_file = trim(temp_file) // "/.fortress_ls"
         stat_file = trim(temp_file) // "_stat"
 
-        ! Get list of files with hidden files
         call execute_command_line("ls -1a '" // trim(dir) // "' > " // trim(temp_file) // " 2>/dev/null", wait=.true.)
 
         open(newunit=unit, file=temp_file, status='old', iostat=ios)
@@ -49,21 +48,19 @@ contains
         end do
         close(unit)
 
-        ! Now get file types using a single stat command for all files
-        ! Use find with -maxdepth 1 and -printf to get type info efficiently
+        ! Now check file attributes - use simpler approach with stat via ls
+        ! Generate a script that checks each file and outputs "filename:type"
         call execute_command_line("cd '" // trim(dir) // "' && " // &
-            "find . -maxdepth 1 -name '.*' -o -name '*' | " // &
-            "while read f; do " // &
-            "  basename=""$f""; " // &
-            "  if [ -d ""$f"" ]; then echo ""$basename:d""; " // &
-            "  elif [ -x ""$f"" ]; then echo ""$basename:x""; " // &
-            "  else echo ""$basename:f""; fi; " // &
+            "for f in $(ls -1a 2>/dev/null); do " // &
+            "  if [ -d ""$f"" ]; then echo ""$f:d""; " // &
+            "  elif [ -x ""$f"" ] && [ ! -d ""$f"" ]; then echo ""$f:x""; " // &
+            "  else echo ""$f:f""; fi; " // &
             "done > " // trim(stat_file) // " 2>/dev/null", wait=.true.)
 
         ! Initialize all as regular non-executable files
-        do ios = 1, count
-            is_dir(ios) = .false.
-            is_exec(ios) = .false.
+        do i = 1, count
+            is_dir(i) = .false.
+            is_exec(i) = .false.
         end do
 
         ! Read the stat results and update file types
@@ -74,23 +71,23 @@ contains
                 if (ios /= 0) exit
 
                 ! Parse "filename:type" format
-                ios = index(line, ':', back=.true.)
-                if (ios > 0) then
-                    fullpath = line(1:ios-1)
-                    file_type = line(ios+1:)
+                stat_code = index(line, ':', back=.true.)
+                if (stat_code > 0) then
+                    filename = line(1:stat_code-1)
+                    file_type = line(stat_code+1:stat_code+1)
 
                     ! Find this file in our list and update its type
-                    do ios = 1, count
-                        if (trim(files(ios)) == trim(fullpath)) then
+                    do i = 1, count
+                        if (trim(files(i)) == trim(filename)) then
                             if (file_type == 'd') then
-                                is_dir(ios) = .true.
-                                is_exec(ios) = .false.
+                                is_dir(i) = .true.
+                                is_exec(i) = .false.
                             else if (file_type == 'x') then
-                                is_dir(ios) = .false.
-                                is_exec(ios) = .true.
+                                is_dir(i) = .false.
+                                is_exec(i) = .true.
                             else
-                                is_dir(ios) = .false.
-                                is_exec(ios) = .false.
+                                is_dir(i) = .false.
+                                is_exec(i) = .false.
                             end if
                             exit
                         end if
