@@ -110,6 +110,9 @@ fpm build --flag "-g -Wall -Wextra"
     - On "..": pastes into parent directory
   - Copy clipboard persists for multiple pastes
   - Cut clipboard auto-clears after paste
+  - **Smart duplicate handling** - automatically appends `-1`, `-2`, etc. if destination exists
+    - `USAGE.md` → `USAGE-1.md`, `USAGE-2.md`, etc.
+    - Works with any file extension or directories
 - **Works on files AND directories** - all operations support recursive directory handling
 
 ### Git Integration (inspired by fuss)

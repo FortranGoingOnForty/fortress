@@ -480,8 +480,9 @@ contains
         use terminal_control, only: CLEAR, GREEN, RED, RESET, BOLD, YELLOW
         character(len=*), intent(in) :: source_path, dest_dir, dest_name
         logical, intent(in) :: is_cut, dest_is_dir
-        character(len=MAX_PATH*2) :: dest_path, cmd
-        integer :: stat
+        character(len=MAX_PATH*2) :: dest_path, cmd, final_dest, base_name, extension
+        character(len=MAX_PATH*2) :: test_path
+        integer :: stat, suffix_num, ext_pos, name_len, ios
 
         ! Determine destination directory based on cursor position
         if (dest_is_dir) then
@@ -500,13 +501,61 @@ contains
             dest_path = dest_dir
         end if
 
+        ! Extract the source filename from source_path
+        stat = index(source_path, "/", back=.true.)
+        if (stat > 0) then
+            base_name = source_path(stat+1:)
+        else
+            base_name = source_path
+        end if
+
+        ! Build initial destination (directory + filename)
+        final_dest = join_path(dest_path, base_name)
+
+        ! Check if destination exists and find available suffix if needed
+        call execute_command_line("test -e '" // trim(final_dest) // "'", exitstat=stat, wait=.true.)
+        if (stat == 0) then
+            ! Destination exists - find next available suffix (for both copy and cut)
+            ! Split filename into name and extension
+            ext_pos = index(base_name, ".", back=.true.)
+            if (ext_pos > 1) then
+                ! Has extension
+                extension = base_name(ext_pos:)
+                name_len = ext_pos - 1
+            else
+                ! No extension
+                extension = ""
+                name_len = len_trim(base_name)
+            end if
+
+            ! Find next available suffix number
+            suffix_num = 1
+            do while (suffix_num < 1000)  ! Safety limit
+                if (len_trim(extension) > 0) then
+                    write(test_path, '(3a,i0,a)') trim(dest_path), "/", base_name(1:name_len), &
+                                                   "-", suffix_num, trim(extension)
+                else
+                    write(test_path, '(3a,i0)') trim(dest_path), "/", trim(base_name), "-", suffix_num
+                end if
+
+                ! Check if this suffixed name exists
+                call execute_command_line("test -e '" // trim(test_path) // "'", exitstat=stat, wait=.true.)
+                if (stat /= 0) then
+                    ! This name is available!
+                    final_dest = test_path
+                    exit
+                end if
+                suffix_num = suffix_num + 1
+            end do
+        end if
+
         ! Execute copy or move command
         if (is_cut) then
             ! Cut = move
-            cmd = "mv '" // trim(source_path) // "' '" // trim(dest_path) // "'"
+            cmd = "mv '" // trim(source_path) // "' '" // trim(final_dest) // "'"
         else
             ! Copy recursively (works for both files and directories)
-            cmd = "cp -r '" // trim(source_path) // "' '" // trim(dest_path) // "'"
+            cmd = "cp -r '" // trim(source_path) // "' '" // trim(final_dest) // "'"
         end if
         call execute_command_line(trim(cmd), exitstat=stat, wait=.true.)
 
@@ -525,7 +574,7 @@ contains
                 write(output_unit, '(a)') GREEN // "✓ Copied successfully!" // RESET
             end if
             write(output_unit, '(a)') "  From: " // trim(source_path)
-            write(output_unit, '(a)') "  To:   " // trim(dest_path)
+            write(output_unit, '(a)') "  To:   " // trim(final_dest)
         else
             if (is_cut) then
                 write(output_unit, '(a)') RED // "✗ Cut failed" // RESET
