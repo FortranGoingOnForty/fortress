@@ -17,7 +17,8 @@ contains
                               in_git_repo, repo_name, branch_name, &
                               move_mode, move_source_name, move_dest_selected, &
                               has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
-                              is_selected, selection_count)
+                              is_selected, selection_count, &
+                              current_is_favorite, parent_is_favorite)
         integer, intent(in) :: r, c, current_count, parent_count, selected, parent_selected
         integer, intent(in) :: scroll_offset, parent_scroll_offset
         character(len=*), intent(in) :: current_dir, repo_name, branch_name
@@ -34,6 +35,7 @@ contains
         integer, intent(in) :: clipboard_count
         logical, dimension(*), intent(in) :: is_selected
         integer, intent(in) :: selection_count
+        logical, dimension(*), intent(in) :: current_is_favorite, parent_is_favorite
         integer :: left_w, i, parent_idx, current_idx, vis_h
         character(len=256) :: fname
         character(len=20) :: color_code
@@ -81,7 +83,13 @@ contains
             ! Parent pane
             if (parent_idx >= 1 .and. parent_idx <= parent_count) then
                 fname = parent_files(parent_idx)
-                if (parent_is_dir(parent_idx) .and. fname /= "." .and. fname /= "..") then
+
+                ! Add star for favorited directories
+                if (parent_is_favorite(parent_idx)) then
+                    fname = "★ " // trim(fname)
+                end if
+
+                if (parent_is_dir(parent_idx) .and. parent_files(parent_idx) /= "." .and. parent_files(parent_idx) /= "..") then
                     fname = trim(fname) // "/"
                 end if
 
@@ -106,7 +114,13 @@ contains
             ! Current pane
             if (current_idx >= 1 .and. current_idx <= current_count) then
                 fname = current_files(current_idx)
-                if (current_is_dir(current_idx) .and. fname /= "." .and. fname /= "..") then
+
+                ! Add star for favorited directories
+                if (current_is_favorite(current_idx)) then
+                    fname = "★ " // trim(fname)
+                end if
+
+                if (current_is_dir(current_idx) .and. current_files(current_idx) /= "." .and. current_files(current_idx) /= "..") then
                     fname = trim(fname) // "/"
                 end if
 
@@ -198,9 +212,9 @@ contains
                                      DIM // "→:enter ←:back ~:home /:root c:cd q:quit" // RESET
         else if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
+                                     DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
         else
-            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
+            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
         end if
 
     contains
