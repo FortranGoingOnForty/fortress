@@ -358,6 +358,25 @@ program fortress
             ! Reset selection to avoid going out of bounds
             selected = 1
             scroll_offset = 0
+        case(126)  ! '~' - go to home directory
+            call get_environment_variable("HOME", temp_dir)
+            if (len_trim(temp_dir) > 0) then
+                current_dir = temp_dir
+                parent_dir = get_parent_path(current_dir)
+                selected = 1
+                scroll_offset = 0
+                selection_anchor = -1
+                call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+            end if
+        case(47)  ! '/' - go to root directory
+            current_dir = "/"
+            parent_dir = "/"
+            selected = 1
+            scroll_offset = 0
+            selection_anchor = -1
+            call clear_all_selections(is_selected, selection_count, in_selection_mode)
+            call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
         case(32)  ! Space - toggle selection on current item
             if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                 if (is_selected(selected)) then
