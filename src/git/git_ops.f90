@@ -317,7 +317,7 @@ contains
         read(*, '(a)', iostat=ios) commit_msg
 
         ! Restore raw mode
-        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
 
         if (ios == 0 .and. len_trim(commit_msg) > 0) then
             ! Execute git commit (use single quotes for message to avoid escaping issues)
@@ -367,7 +367,7 @@ contains
             write(output_unit, '(a)') RED // "No upstream selected." // RESET
             call execute_command_line("sleep 1")
             ! Re-enable raw mode
-            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
             call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
             return
         end if
@@ -395,7 +395,7 @@ contains
 
         call execute_command_line("rm -f " // trim(temp_file) // " 2>/dev/null")
         ! Re-enable raw mode
-        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
     end subroutine prompt_upstream_selection
 
     subroutine git_push_prompt(dir, repo_name)
@@ -472,7 +472,7 @@ contains
             read(*, '(a)', iostat=ios) tag_message
 
             ! Restore raw mode
-            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
 
             if (ios == 0) then
                 ! Execute git tag
@@ -501,7 +501,7 @@ contains
             end if
         else
             ! Restore raw mode if tag name was empty
-            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+            call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
         end if
     end subroutine git_tag_prompt
 
@@ -510,6 +510,7 @@ contains
         logical, intent(in) :: is_staged, is_unstaged
         character(len=MAX_PATH*2) :: git_cmd
         character(len=1) :: key
+        integer :: ios
 
         ! Clear screen
         write(output_unit, '(a)', advance='no') CLEAR
@@ -538,9 +539,11 @@ contains
         write(output_unit, *)
         write(output_unit, '(a)') GREY // "Press any key to return..." // RESET
 
-        ! Restore raw mode before reading
-        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
-        read(*, '(a1)', advance='no') key
+        ! Restore raw mode and give terminal time to settle
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null && sleep 0.05", wait=.true.)
+
+        ! Read keypress with error handling for any buffering issues
+        read(*, '(a1)', advance='no', iostat=ios) key
     end subroutine show_git_diff_fullscreen
 
     subroutine git_fetch_prompt(dir, repo_name)

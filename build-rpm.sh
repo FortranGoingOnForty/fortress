@@ -21,13 +21,13 @@ mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 echo "▶ Creating source tarball..."
 # Create source tarball (excluding build artifacts and git)
 tar --exclude='.git' \
-    --exclude='build' \
-    --exclude='*.rpm' \
-    --exclude='*.tar.gz' \
-    --exclude='rpmbuild' \
-    --transform "s,^.,$NAME-$VERSION," \
-    -czf ~/rpmbuild/SOURCES/$NAME-$VERSION.tar.gz \
-    .
+  --exclude='build' \
+  --exclude='*.rpm' \
+  --exclude='*.tar.gz' \
+  --exclude='rpmbuild' \
+  --transform "s,^.,$NAME-$VERSION," \
+  -czf ~/rpmbuild/SOURCES/$NAME-$VERSION.tar.gz \
+  .
 
 echo "✓ Tarball created: ~/rpmbuild/SOURCES/$NAME-$VERSION.tar.gz"
 
