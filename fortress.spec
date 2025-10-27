@@ -1,5 +1,5 @@
 Name:           fortress
-Version:        0.9.91
+Version:        0.9.92
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -103,6 +103,11 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Mon Oct 27 2025 mfw <espadon@outlook.com> - 0.9.92-1
+- Add favorites functionality with * and 8 keybinds
+- Add jump to ~ and / with keybinds
+- Fix display alignment issues with pipes
+
 * Sun Oct 26 2025 mfw <espadon@outlook.com> - 0.9.91-1
 - Fix runtime errors on switching terminal modes
 - Improve terminal mode handling
