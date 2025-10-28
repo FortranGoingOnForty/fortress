@@ -1,5 +1,5 @@
 Name:           fortress
-Version:        0.9.92
+Version:        0.9.93
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -103,6 +103,10 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Mon Oct 27 2025 mfw <espadon@outlook.com> - 0.9.93-1
+- Fix shell integration to find fortress-bin in PATH
+- Improves Homebrew compatibility on macOS
+
 * Mon Oct 27 2025 mfw <espadon@outlook.com> - 0.9.92-1
 - Add favorites functionality with * and 8 keybinds
 - Add jump to ~ and / with keybinds
