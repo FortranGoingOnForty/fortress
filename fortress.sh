@@ -8,8 +8,11 @@ fortress() {
     # Determine which fortress binary to use
     local fortress_exe
 
-    if [ -x "/usr/bin/fortress-bin" ]; then
-        # Use system-installed binary (via package manager)
+    # Check for fortress-bin in PATH first (works for all package managers including Homebrew)
+    if command -v fortress-bin &> /dev/null; then
+        fortress_exe="fortress-bin"
+    elif [ -x "/usr/bin/fortress-bin" ]; then
+        # Use system-installed binary (via package manager like RPM/AUR)
         fortress_exe="/usr/bin/fortress-bin"
     elif [ -n "$FORTRESS_DIR" ]; then
         # Use FORTRESS_DIR if set

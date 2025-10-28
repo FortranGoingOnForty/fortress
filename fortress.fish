@@ -7,11 +7,17 @@
 function fortress --description "Navigate filesystem with FORTRESS and cd on exit"
     # Set fortress directory - prefer system install, fallback to FORTRESS_DIR env var
     set -l fortress_dir
-    if set -q FORTRESS_DIR
-        set fortress_dir $FORTRESS_DIR
+    set -l fortress_exe
+
+    # Check for fortress-bin in PATH first (works for all package managers including Homebrew)
+    if command -v fortress-bin &> /dev/null
+        set fortress_exe fortress-bin
     else if test -x /usr/bin/fortress-bin
-        # Use system-installed binary
+        # Use system-installed binary (RPM/AUR)
         set fortress_exe /usr/bin/fortress-bin
+    else if set -q FORTRESS_DIR
+        set fortress_dir $FORTRESS_DIR
+        set fortress_exe $fortress_dir/build/gfortran_*/app/fortress
     else
         # Fallback to local development path
         set fortress_dir $HOME/Documents/GithubOrgs/FortranGoingOnForty/fortress
