@@ -1,5 +1,5 @@
 Name:           fortress
-Version:        0.9.94
+Version:        0.9.98
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -103,6 +103,10 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Wed Oct 29 2025 mfw <espadon@outlook.com> - 0.9.98-1
+- Merge favorites branch into trunk
+- Ensures all features (favorites, jump binds) are in trunk
+
 * Mon Oct 27 2025 mfw <espadon@outlook.com> - 0.9.94-1
 - Change cursor selection approach for consistent cross-platform experience
 - Move away from reverse video highlighting to fix macOS inconsistencies
