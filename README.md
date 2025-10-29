@@ -142,6 +142,8 @@ fpm build --flag "-g -Wall -Wextra"
 - `↑/↓`: Navigate up/down
 - `→`: Enter directory
 - `←`: Go back to parent directory
+- `~`: Jump to home directory
+- `/`: Jump to root directory
 - `s`: Search files with fzf (fuzzy find recursively)
 - `c`: CD to selected directory and exit (requires shell integration)
 - `q`: Quit (or exit move mode if active)

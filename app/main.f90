@@ -45,6 +45,11 @@ program fortress
     character(len=MAX_PATH), dimension(MAX_FILES) :: clipboard_names
     integer :: clipboard_count = 0
 
+    ! Favorites/bookmarks state
+    character(len=MAX_PATH), dimension(10) :: favorite_dirs
+    integer :: favorite_count = 0
+    logical, dimension(MAX_FILES) :: current_is_favorite, parent_is_favorite
+
     character(len=1) :: key
     integer :: i, rows, cols, visible_height
     logical :: is_shift_pressed
@@ -53,6 +58,7 @@ program fortress
     current_dir = get_pwd()
     parent_dir = get_parent_path(current_dir)
     call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+    call load_favorites(favorite_dirs, favorite_count)
     call setup_raw_mode()
 
     ! Initialize selection array to false
@@ -95,6 +101,12 @@ program fortress
                                current_is_staged, current_is_unstaged, current_is_untracked)
             call mark_incoming_changes(current_dir, current_files, current_count, current_has_incoming)
         end if
+
+        ! Mark favorited directories
+        call mark_favorites_in_lists(current_dir, current_files, current_count, current_is_dir, &
+                                     favorite_dirs, favorite_count, current_is_favorite)
+        call mark_favorites_in_lists(parent_dir, parent_files, parent_count, parent_is_dir, &
+                                     favorite_dirs, favorite_count, parent_is_favorite)
 
         ! Get terminal size
         call get_term_size(rows, cols)
@@ -156,7 +168,8 @@ program fortress
                            in_git_repo, repo_name, branch_name, &
                            move_mode, move_source_name, move_dest_selected, &
                            has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
-                           is_selected, selection_count)
+                           is_selected, selection_count, &
+                           current_is_favorite, parent_is_favorite)
 
         ! Get input (with error handling for End-of-record after Enter key)
         read(*, '(a1)', advance='no', iostat=i) key
@@ -363,6 +376,61 @@ program fortress
             ! Reset selection to avoid going out of bounds
             selected = 1
             scroll_offset = 0
+        case(126)  ! '~' - go to home directory
+            call get_environment_variable("HOME", temp_dir)
+            if (len_trim(temp_dir) > 0) then
+                current_dir = temp_dir
+                parent_dir = get_parent_path(current_dir)
+                selected = 1
+                scroll_offset = 0
+                selection_anchor = -1
+                call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+            end if
+        case(47)  ! '/' - go to root directory
+            current_dir = "/"
+            parent_dir = "/"
+            selected = 1
+            scroll_offset = 0
+            selection_anchor = -1
+            call clear_all_selections(is_selected, selection_count, in_selection_mode)
+            call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+        case(42)  ! '*' - toggle favorite on current directory
+            if (current_is_dir(selected) .and. trim(current_files(selected)) /= "." .and. &
+                trim(current_files(selected)) /= "..") then
+                ! Build full path for the directory
+                temp_dir = join_path(current_dir, current_files(selected))
+
+                ! Check if already favorited
+                if (is_dir_favorited(temp_dir, favorite_dirs, favorite_count)) then
+                    ! Remove from favorites
+                    call toggle_favorite(temp_dir, favorite_dirs, favorite_count)
+                    call save_favorites(favorite_dirs, favorite_count)
+                else
+                    ! Try to add
+                    if (favorite_count < 10) then
+                        ! Room available - add it
+                        call toggle_favorite(temp_dir, favorite_dirs, favorite_count)
+                        call save_favorites(favorite_dirs, favorite_count)
+                    else
+                        ! Full - prompt for replacement
+                        call add_favorite_with_replacement(temp_dir, favorite_dirs, favorite_count)
+                        call save_favorites(favorite_dirs, favorite_count)
+                    end if
+                end if
+            end if
+        case(56)  ! '8' - open favorites picker
+            call open_favorites_picker(favorite_dirs, favorite_count, temp_dir)
+            if (len_trim(temp_dir) > 0) then
+                ! Navigate to selected favorite
+                parent_dir = get_parent_path(temp_dir)
+                current_dir = temp_dir
+                selected = 1
+                scroll_offset = 0
+                selection_anchor = -1
+                call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+            end if
         case(32)  ! Space - toggle selection on current item
             if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                 if (is_selected(selected)) then
@@ -1086,5 +1154,247 @@ contains
                 end if
             end do
     end subroutine get_unique_dest_name
+
+    subroutine load_favorites(favs, count)
+        character(len=MAX_PATH), dimension(10), intent(out) :: favs
+        integer, intent(out) :: count
+        character(len=MAX_PATH) :: favorites_file
+        integer :: unit, ios
+
+        count = 0
+        call get_environment_variable("HOME", favorites_file)
+        favorites_file = trim(favorites_file) // "/.fortress_favorites"
+
+        open(newunit=unit, file=favorites_file, status='old', action='read', iostat=ios)
+        if (ios /= 0) return  ! File doesn't exist yet
+
+        do while (count < 10)
+            read(unit, '(a)', iostat=ios) favs(count + 1)
+            if (ios /= 0) exit
+            if (len_trim(favs(count + 1)) > 0) count = count + 1
+        end do
+
+        close(unit)
+    end subroutine load_favorites
+
+    subroutine save_favorites(favs, count)
+        character(len=MAX_PATH), dimension(10), intent(in) :: favs
+        integer, intent(in) :: count
+        character(len=MAX_PATH) :: favorites_file
+        integer :: unit, ios, i
+
+        call get_environment_variable("HOME", favorites_file)
+        favorites_file = trim(favorites_file) // "/.fortress_favorites"
+
+        open(newunit=unit, file=favorites_file, status='replace', action='write', iostat=ios)
+        if (ios /= 0) return
+
+        do i = 1, count
+            write(unit, '(a)') trim(favs(i))
+        end do
+
+        close(unit)
+    end subroutine save_favorites
+
+    function is_dir_favorited(dir_path, favs, count) result(is_fav)
+        character(len=*), intent(in) :: dir_path
+        character(len=MAX_PATH), dimension(10), intent(in) :: favs
+        integer, intent(in) :: count
+        logical :: is_fav
+        integer :: i
+
+        is_fav = .false.
+        do i = 1, count
+            if (trim(favs(i)) == trim(dir_path)) then
+                is_fav = .true.
+                return
+            end if
+        end do
+    end function is_dir_favorited
+
+    subroutine toggle_favorite(dir_path, favs, count)
+        character(len=*), intent(in) :: dir_path
+        character(len=MAX_PATH), dimension(10), intent(inout) :: favs
+        integer, intent(inout) :: count
+        integer :: i, j
+        logical :: found
+
+        ! Check if already favorited
+        found = .false.
+        do i = 1, count
+            if (trim(favs(i)) == trim(dir_path)) then
+                ! Found - remove it
+                found = .true.
+                ! Shift remaining favorites down
+                do j = i, count - 1
+                    favs(j) = favs(j + 1)
+                end do
+                favs(count) = ""
+                count = count - 1
+                exit
+            end if
+        end do
+
+        if (.not. found) then
+            ! Not found - add it (if we have space)
+            if (count < 10) then
+                count = count + 1
+                favs(count) = dir_path
+            end if
+        end if
+    end subroutine toggle_favorite
+
+    subroutine add_favorite_with_replacement(dir_path, favs, count)
+        use iso_fortran_env, only: output_unit
+        use terminal_control, only: CLEAR, GREEN, RED, RESET, BOLD
+        character(len=*), intent(in) :: dir_path
+        character(len=MAX_PATH), dimension(10), intent(inout) :: favs
+        integer, intent(in) :: count
+        character(len=MAX_PATH) :: temp_file, selected_fav
+        integer :: unit, ios, stat, i
+
+        ! Clear screen and show prompt
+        write(output_unit, '(a)', advance='no') CLEAR
+        write(output_unit, '(a)') BOLD // "Favorites Full (10/10)" // RESET
+        write(output_unit, *)
+        write(output_unit, '(a)') "Select a favorite to replace:"
+        write(output_unit, *)
+
+        ! Restore terminal for fzf
+        call execute_command_line("stty sane 2>/dev/null")
+
+        ! Create temp file with current favorites
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_fav_temp"
+
+        open(newunit=unit, file=temp_file, status='replace', action='write', iostat=ios)
+        if (ios == 0) then
+            do i = 1, count
+                write(unit, '(a)') trim(favs(i))
+            end do
+            close(unit)
+        end if
+
+        ! Use fzf to select which favorite to replace
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_fav_select"
+        call execute_command_line("cat ~/.fortress_fav_temp | fzf --height=10 --prompt='Replace: ' > " // &
+                                 trim(temp_file) // " 2>/dev/null", exitstat=stat, wait=.true.)
+
+        if (stat == 0) then
+            ! Read selected favorite
+            open(newunit=unit, file=temp_file, status='old', action='read', iostat=ios)
+            if (ios == 0) then
+                read(unit, '(a)', iostat=ios) selected_fav
+                close(unit)
+
+                if (ios == 0 .and. len_trim(selected_fav) > 0) then
+                    ! Replace the selected favorite with the new one
+                    do i = 1, count
+                        if (trim(favs(i)) == trim(selected_fav)) then
+                            favs(i) = dir_path
+                            write(output_unit, '(a)') GREEN // "✓ Replaced: " // trim(selected_fav) // RESET
+                            write(output_unit, '(a)') "     With: " // trim(dir_path)
+                            call execute_command_line("sleep 1")
+                            exit
+                        end if
+                    end do
+                end if
+            end if
+        else
+            write(output_unit, '(a)') RED // "Cancelled." // RESET
+            call execute_command_line("sleep 1")
+        end if
+
+        ! Cleanup temp files
+        call execute_command_line("rm -f ~/.fortress_fav_temp ~/.fortress_fav_select 2>/dev/null")
+
+        ! Re-enable raw mode
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
+    end subroutine add_favorite_with_replacement
+
+    subroutine mark_favorites_in_lists(current_dir, files, count, is_dir, favs, fav_count, is_fav)
+        character(len=*), intent(in) :: current_dir
+        character(len=*), dimension(*), intent(in) :: files
+        integer, intent(in) :: count
+        logical, dimension(*), intent(in) :: is_dir
+        character(len=MAX_PATH), dimension(10), intent(in) :: favs
+        integer, intent(in) :: fav_count
+        logical, dimension(*), intent(out) :: is_fav
+        character(len=MAX_PATH) :: full_path
+        integer :: i
+
+        ! Initialize all to false
+        do i = 1, count
+            is_fav(i) = .false.
+        end do
+
+        ! Mark directories that are in favorites
+        do i = 1, count
+            if (is_dir(i) .and. trim(files(i)) /= "." .and. trim(files(i)) /= "..") then
+                ! Build full path and check if favorited
+                full_path = join_path(current_dir, files(i))
+                is_fav(i) = is_dir_favorited(full_path, favs, fav_count)
+            end if
+        end do
+    end subroutine mark_favorites_in_lists
+
+    subroutine open_favorites_picker(favs, count, selected_dir)
+        use iso_fortran_env, only: output_unit
+        use terminal_control, only: CLEAR, GREEN, RED, RESET, BOLD
+        character(len=MAX_PATH), dimension(10), intent(in) :: favs
+        integer, intent(in) :: count
+        character(len=MAX_PATH), intent(out) :: selected_dir
+        character(len=MAX_PATH) :: temp_file
+        integer :: unit, ios, stat, i
+
+        selected_dir = ""
+
+        if (count == 0) then
+            ! No favorites yet
+            write(output_unit, '(a)', advance='no') CLEAR
+            write(output_unit, '(a)') RED // "No favorites yet!" // RESET
+            write(output_unit, *)
+            write(output_unit, '(a)') "Press '*' on a directory to add it to favorites."
+            call execute_command_line("sleep 2")
+            return
+        end if
+
+        ! Restore terminal for fzf
+        call execute_command_line("stty sane 2>/dev/null")
+
+        ! Create temp file with favorites
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_fav_picker"
+
+        open(newunit=unit, file=temp_file, status='replace', action='write', iostat=ios)
+        if (ios == 0) then
+            do i = 1, count
+                write(unit, '(a)') trim(favs(i))
+            end do
+            close(unit)
+        end if
+
+        ! Use fzf to select favorite
+        call get_environment_variable("HOME", temp_file)
+        temp_file = trim(temp_file) // "/.fortress_fav_selected"
+        call execute_command_line("cat ~/.fortress_fav_picker | fzf --height=10 --prompt='Jump to: ' > " // &
+                                 trim(temp_file) // " 2>/dev/null", exitstat=stat, wait=.true.)
+
+        if (stat == 0) then
+            ! Read selected directory
+            open(newunit=unit, file=temp_file, status='old', action='read', iostat=ios)
+            if (ios == 0) then
+                read(unit, '(a)', iostat=ios) selected_dir
+                close(unit)
+            end if
+        end if
+
+        ! Cleanup temp files
+        call execute_command_line("rm -f ~/.fortress_fav_picker ~/.fortress_fav_selected 2>/dev/null")
+
+        ! Re-enable raw mode
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
+    end subroutine open_favorites_picker
 
 end program fortress

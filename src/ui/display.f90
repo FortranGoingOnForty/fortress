@@ -18,7 +18,8 @@ contains
                               in_git_repo, repo_name, branch_name, &
                               move_mode, move_source_name, move_dest_selected, &
                               has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
-                              is_selected, selection_count)
+                              is_selected, selection_count, &
+                              current_is_favorite, parent_is_favorite)
         integer, intent(in) :: r, c, current_count, parent_count, selected, parent_selected
         integer, intent(in) :: scroll_offset, parent_scroll_offset
         character(len=*), intent(in) :: current_dir, repo_name, branch_name
@@ -35,7 +36,8 @@ contains
         integer, intent(in) :: clipboard_count
         logical, dimension(*), intent(in) :: is_selected
         integer, intent(in) :: selection_count
-        integer :: left_w, i, parent_idx, current_idx, vis_h
+        logical, dimension(*), intent(in) :: current_is_favorite, parent_is_favorite
+        integer :: left_w, i, parent_idx, current_idx, vis_h, display_len
         character(len=256) :: fname
         character(len=20) :: color_code
 
@@ -82,21 +84,32 @@ contains
             ! Parent pane
             if (parent_idx >= 1 .and. parent_idx <= parent_count) then
                 fname = parent_files(parent_idx)
-                if (parent_is_dir(parent_idx) .and. fname /= "." .and. fname /= "..") then
+
+                ! Track if this item has a star (for visual width adjustment)
+                display_len = 0
+                if (parent_is_favorite(parent_idx)) then
+                    fname = "★ " // trim(fname)
+                    display_len = 1  ! Star takes 2 visual columns, so add 1 extra
+                end if
+
+                if (parent_is_dir(parent_idx) .and. parent_files(parent_idx) /= "." .and. parent_files(parent_idx) /= "..") then
                     fname = trim(fname) // "/"
                 end if
 
                 ! Get color for parent file
                 color_code = get_file_color(parent_files(parent_idx), parent_is_dir(parent_idx), parent_is_exec(parent_idx))
 
+                ! Calculate visual width: string length + extra for wide char
+                display_len = min(len_trim(fname) + display_len, left_w)
+
                 if (parent_idx == parent_selected) then
                     write(output_unit, '(a)', advance='no') DIM // BOLD // trim(color_code) // &
-                        fname(1:min(len_trim(fname),left_w)) // RESET
+                        fname(1:min(len_trim(fname), left_w)) // RESET
                 else
                     write(output_unit, '(a)', advance='no') DIM // trim(color_code) // &
-                        fname(1:min(len_trim(fname),left_w)) // RESET
+                        fname(1:min(len_trim(fname), left_w)) // RESET
                 end if
-                write(output_unit, '(a)', advance='no') repeat(" ", max(0, left_w - len_trim(fname)))
+                write(output_unit, '(a)', advance='no') repeat(" ", max(0, left_w - display_len))
             else
                 write(output_unit, '(a)', advance='no') repeat(" ", left_w)
             end if
@@ -111,9 +124,20 @@ contains
             if (current_idx >= 1 .and. current_idx <= current_count) then
 
                 fname = current_files(current_idx)
-                if (current_is_dir(current_idx) .and. fname /= "." .and. fname /= "..") then
+
+                ! Track if this item has a star (for visual width - star takes 2 columns)
+                display_len = 0
+                if (current_is_favorite(current_idx)) then
+                    fname = "★ " // trim(fname)
+                    display_len = 1  ! Add 1 to account for star being 2 visual columns
+                end if
+
+                if (current_is_dir(current_idx) .and. current_files(current_idx) /= "." .and. current_files(current_idx) /= "..") then
                     fname = trim(fname) // "/"
                 end if
+
+                ! Store the visual display length for this line (used by git indicators)
+                display_len = len_trim(fname) + display_len
 
                 ! Get color for current file
                 color_code = get_file_color(current_files(current_idx), current_is_dir(current_idx), current_is_exec(current_idx))
@@ -188,17 +212,17 @@ contains
         ! Footer
         if (move_mode) then
             write(output_unit, '(a)') RED // "MOVE MODE: " // RESET // &
-                                     DIM // "↑↓:next/prev dir →:enter dir ←:parent v:move here q:cancel" // RESET
+                                     DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root v:move here q:cancel" // RESET
         else if (selection_count > 0) then
             ! Selection mode footer - show multi-select help
             write(output_unit, '(a)') BLUE // "MULTI-SELECT: " // RESET // &
                                      DIM // "Space:toggle Shift+↑↓:block select y:copy x:cut p:paste r:delete | " // RESET // &
-                                     DIM // "→:enter ←:back c:cd q:quit" // RESET
+                                     DIM // "→:enter ←:back ~:home /:root c:cd q:quit" // RESET
         else if (in_git_repo) then
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
+                                     DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
         else
-            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back s:search o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
+            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
         end if
 
     contains
