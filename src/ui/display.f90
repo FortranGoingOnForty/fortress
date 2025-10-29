@@ -1,6 +1,7 @@
 module ui_display
     use iso_fortran_env, only: output_unit
-    use terminal_control
+    use terminal_control, only: DIM, BOLD, RESET, UNDERLINE, &
+                                BLUE, GREEN, RED, GREY, WHITE, YELLOW
     use git_ops, only: write_git_indicators
     use filesystem_ops, only: MAX_PATH, MAX_FILES
     implicit none
@@ -100,11 +101,15 @@ contains
                 write(output_unit, '(a)', advance='no') repeat(" ", left_w)
             end if
 
+            ! RESET before separator to clear any state from parent pane
+            write(output_unit, '(a)', advance='no') RESET
+
             ! Separator
             write(output_unit, '(a)', advance='no') " │ "
 
             ! Current pane
             if (current_idx >= 1 .and. current_idx <= current_count) then
+
                 fname = current_files(current_idx)
                 if (current_is_dir(current_idx) .and. fname /= "." .and. fname /= "..") then
                     fname = trim(fname) // "/"
@@ -132,8 +137,8 @@ contains
                     write(output_unit, '(a)', advance='no') RED // BOLD // trim(fname) // RESET
                     write(output_unit, '(a)') ""
                 else if (move_mode .and. current_idx == move_dest_selected) then
-                    ! Destination cursor - show with white background
-                    write(output_unit, '(a)', advance='no') REVERSE // WHITE // trim(fname)
+                    ! Destination cursor - show with bold+underline
+                    write(output_unit, '(a)', advance='no') BOLD // UNDERLINE // WHITE // trim(fname)
                     if (in_git_repo) then
                         call write_git_indicators(current_is_staged(current_idx), &
                                                   current_is_unstaged(current_idx), &
@@ -142,15 +147,8 @@ contains
                     end if
                     write(output_unit, '(a)') RESET
                 else if (current_idx == selected .and. .not. move_mode) then
-                    ! Normal selection cursor (not in move mode)
-                    ! If file is cut, show selected with red background instead of default color
-                    ! Only highlight for single-item cuts (multi-cuts shown in header)
-                    if (has_clipboard .and. clipboard_is_cut .and. clipboard_count == 1 .and. &
-                        trim(current_files(current_idx)) == trim(clipboard_source_name)) then
-                        write(output_unit, '(a)', advance='no') REVERSE // RED // trim(fname)
-                    else
-                        write(output_unit, '(a)', advance='no') REVERSE // trim(color_code) // trim(fname)
-                    end if
+                    ! Normal selection cursor (not in move mode) - use bold+underline with original color
+                    write(output_unit, '(a)', advance='no') BOLD // UNDERLINE // trim(color_code) // trim(fname)
                     ! Add git indicators if in repo
                     if (in_git_repo) then
                         call write_git_indicators(current_is_staged(current_idx), &
@@ -160,8 +158,8 @@ contains
                     end if
                     write(output_unit, '(a)') RESET
                 else if (is_selected(current_idx)) then
-                    ! Multi-selected item (not the cursor) - show with cyan background
-                    write(output_unit, '(a)', advance='no') REVERSE // trim(color_code) // trim(fname)
+                    ! Multi-selected item (not the cursor) - show with underline
+                    write(output_unit, '(a)', advance='no') UNDERLINE // trim(color_code) // trim(fname)
                     ! Add git indicators if in repo
                     if (in_git_repo) then
                         call write_git_indicators(current_is_staged(current_idx), &

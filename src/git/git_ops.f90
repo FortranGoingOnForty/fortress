@@ -239,31 +239,32 @@ contains
     subroutine write_git_indicators(staged, unstaged, untracked, has_incoming, highlighted)
         logical, intent(in) :: staged, unstaged, untracked, has_incoming, highlighted
 
-        ! Write indicators without RESET (caller handles that)
+        ! When highlighted (cursor), don't change colors - just write symbols
+        ! When not highlighted, use colors with immediate RESET
         if (staged) then
             if (highlighted) then
-                write(output_unit, '(a)', advance='no') GREEN // " ↑"
+                write(output_unit, '(a)', advance='no') " ↑"
             else
                 write(output_unit, '(a)', advance='no') GREEN // " ↑" // RESET
             end if
         end if
         if (unstaged) then
             if (highlighted) then
-                write(output_unit, '(a)', advance='no') RED // " ✗"
+                write(output_unit, '(a)', advance='no') " ✗"
             else
                 write(output_unit, '(a)', advance='no') RED // " ✗" // RESET
             end if
         end if
         if (untracked) then
             if (highlighted) then
-                write(output_unit, '(a)', advance='no') GREY // " ✗"
+                write(output_unit, '(a)', advance='no') " ✗"
             else
                 write(output_unit, '(a)', advance='no') GREY // " ✗" // RESET
             end if
         end if
         if (has_incoming) then
             if (highlighted) then
-                write(output_unit, '(a)', advance='no') YELLOW // " ↓"
+                write(output_unit, '(a)', advance='no') " ↓"
             else
                 write(output_unit, '(a)', advance='no') YELLOW // " ↓" // RESET
             end if

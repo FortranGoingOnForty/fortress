@@ -4,8 +4,8 @@ module terminal_control
     private
 
     public :: get_term_size, setup_raw_mode, restore_terminal, read_arrow_key, read_arrow_key_with_shift
-    public :: ESC, CLEAR, BOLD, DIM, REVERSE, RESET
-    public :: BLUE, GREEN, RED, GREY, WHITE, YELLOW
+    public :: ESC, CLEAR, BOLD, DIM, REVERSE, NOREVERSE, RESET, UNDERLINE
+    public :: BLUE, GREEN, RED, GREY, WHITE, YELLOW, BG_WHITE, BLACK
     public :: invalidate_term_cache
 
     ! ANSI escape codes
@@ -13,7 +13,9 @@ module terminal_control
     character(len=*), parameter :: CLEAR = ESC // "[2J" // ESC // "[H"
     character(len=*), parameter :: BOLD = ESC // "[1m"
     character(len=*), parameter :: DIM = ESC // "[2m"
+    character(len=*), parameter :: UNDERLINE = ESC // "[4m"
     character(len=*), parameter :: REVERSE = ESC // "[7m"
+    character(len=*), parameter :: NOREVERSE = ESC // "[27m"  ! Explicitly turn off reverse video
     character(len=*), parameter :: RESET = ESC // "[0m"
     character(len=*), parameter :: BLUE = ESC // "[34m"
     character(len=*), parameter :: GREEN = ESC // "[32m"
@@ -21,6 +23,8 @@ module terminal_control
     character(len=*), parameter :: GREY = ESC // "[90m"
     character(len=*), parameter :: WHITE = ESC // "[37m"
     character(len=*), parameter :: YELLOW = ESC // "[33m"
+    character(len=*), parameter :: BLACK = ESC // "[30m"
+    character(len=*), parameter :: BG_WHITE = ESC // "[47m"  ! White background
 
     ! Terminal size cache
     integer, save :: cached_rows = 0

@@ -55,6 +55,11 @@ program fortress
     call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
     call setup_raw_mode()
 
+    ! Initialize selection array to false
+    do i = 1, MAX_FILES
+        is_selected(i) = .false.
+    end do
+
     ! Main loop
     do while (running)
         ! Get files
