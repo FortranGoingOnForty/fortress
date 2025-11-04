@@ -89,7 +89,7 @@ contains
                 display_len = 0
                 if (parent_is_favorite(parent_idx)) then
                     fname = "★ " // trim(fname)
-                    display_len = 1  ! Star takes 2 visual columns, so add 1 extra
+                    display_len = -2  ! "★ " is 4 bytes but 2 visual cols, so subtract 2
                 end if
 
                 if (parent_is_dir(parent_idx) .and. parent_files(parent_idx) /= "." .and. parent_files(parent_idx) /= "..") then
@@ -129,7 +129,7 @@ contains
                 display_len = 0
                 if (current_is_favorite(current_idx)) then
                     fname = "★ " // trim(fname)
-                    display_len = 1  ! Add 1 to account for star being 2 visual columns
+                    display_len = -2  ! "★ " is 4 bytes but 2 visual cols, so subtract 2
                 end if
 
                 if (current_is_dir(current_idx) .and. current_files(current_idx) /= "." .and. current_files(current_idx) /= "..") then
