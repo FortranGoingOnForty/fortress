@@ -37,12 +37,26 @@ contains
         logical, dimension(*), intent(in) :: is_selected
         integer, intent(in) :: selection_count
         logical, dimension(*), intent(in) :: current_is_favorite, parent_is_favorite
-        integer :: left_w, i, parent_idx, current_idx, vis_h, display_len
-        character(len=256) :: fname
+        integer :: left_w, i, parent_idx, current_idx, vis_h, display_len, top_padding
+        character(len=256) :: fname, term_program
         character(len=20) :: color_code
 
+        ! Detect terminal emulator and add appropriate padding
+        ! Most terminals need 1 line, WezTerm/Ghostty need 2
+        call get_environment_variable("TERM_PROGRAM", term_program)
+        if (index(term_program, "WezTerm") > 0 .or. index(term_program, "ghostty") > 0) then
+            top_padding = 2  ! WezTerm/Ghostty need 2 lines of padding
+        else
+            top_padding = 1  ! Most other terminals need 1 line
+        end if
+
         left_w = c * 3 / 10
-        vis_h = r - 3  ! Visible height
+        vis_h = r - 3 - top_padding  ! Visible height (reduced by padding if needed)
+
+        ! Add blank lines at top as padding for terminals that need it
+        do i = 1, top_padding
+            write(output_unit, '(a)') ""
+        end do
 
         ! Header
         if (move_mode) then

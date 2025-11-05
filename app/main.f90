@@ -60,6 +60,16 @@ program fortress
     call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
     call load_favorites(favorite_dirs, favorite_count)
     call setup_raw_mode()
+    call enter_alt_screen()  ! Use alternate screen buffer to prevent scrolling issues
+    call hide_cursor()  ! Hide cursor for cleaner display
+
+    ! Reset scroll region and clear completely
+    write(output_unit, '(a)', advance='no') ESC // "[r"  ! Disable scroll region
+    write(output_unit, '(a)', advance='no') ESC // "[1;1H"  ! Position at 1,1
+    write(output_unit, '(a)', advance='no') ESC // "[2J"  ! Clear screen
+    write(output_unit, '(a)') ""  ! Write a blank line to ensure we're at row 2
+    write(output_unit, '(a)', advance='no') ESC // "[1;1H"  ! Go back to 1,1
+    flush(output_unit)
 
     ! Initialize selection array to false
     do i = 1, MAX_FILES
@@ -159,8 +169,11 @@ program fortress
             parent_scroll_offset = max(0, min(parent_scroll_offset, max(0, parent_count - visible_height)))
         end if
 
-        ! Draw
-        write(output_unit, '(a)', advance='no') CLEAR
+        ! Draw - reset scroll region, position at 1,1, then clear
+        write(output_unit, '(a)', advance='no') ESC // "[r"  ! Reset scroll region
+        write(output_unit, '(a)', advance='no') ESC // "[1;1H"  ! Position at 1,1
+        write(output_unit, '(a)', advance='no') ESC // "[2J"  ! Clear screen
+        flush(output_unit)
         call draw_interface(rows, cols, current_dir, current_files, current_is_dir, current_is_exec, &
                            current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
                            current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
@@ -534,6 +547,8 @@ program fortress
     end do
 
     ! Cleanup
+    call show_cursor()  ! Restore cursor visibility
+    call exit_alt_screen()  ! Return to normal screen buffer
     call restore_terminal()
     write(output_unit, '(a)', advance='no') CLEAR
 

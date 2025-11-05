@@ -7,10 +7,18 @@ module terminal_control
     public :: ESC, CLEAR, BOLD, DIM, REVERSE, NOREVERSE, RESET, UNDERLINE
     public :: BLUE, GREEN, RED, GREY, WHITE, YELLOW, BG_WHITE, BLACK
     public :: invalidate_term_cache
+    public :: enter_alt_screen, exit_alt_screen, hide_cursor, show_cursor
 
     ! ANSI escape codes
     character(len=*), parameter :: ESC = char(27)
-    character(len=*), parameter :: CLEAR = ESC // "[2J" // ESC // "[H"
+    character(len=*), parameter :: CLEAR = ESC // "[H" // ESC // "[2J"  ! Move to home, then clear
+    character(len=*), parameter :: ALT_SCREEN_ON = ESC // "[?1049h"  ! Enter alternate screen
+    character(len=*), parameter :: ALT_SCREEN_OFF = ESC // "[?1049l"  ! Exit alternate screen
+    character(len=*), parameter :: CURSOR_HIDE = ESC // "[?25l"  ! Hide cursor
+    character(len=*), parameter :: CURSOR_SHOW = ESC // "[?25h"  ! Show cursor
+    character(len=*), parameter :: HOME = ESC // "[1;1H"  ! Explicit move to 1,1
+    character(len=*), parameter :: RESET_TERM = ESC // "c"  ! Full terminal reset
+    character(len=*), parameter :: DISABLE_SCROLL = ESC // "[r"  ! Reset scroll region
     character(len=*), parameter :: BOLD = ESC // "[1m"
     character(len=*), parameter :: DIM = ESC // "[2m"
     character(len=*), parameter :: UNDERLINE = ESC // "[4m"
@@ -94,6 +102,30 @@ contains
     subroutine restore_terminal()
         call execute_command_line("stty icanon echo 2>/dev/null")
     end subroutine restore_terminal
+
+    subroutine enter_alt_screen()
+        ! Switch to alternate screen buffer
+        write(output_unit, '(a)', advance='no') ALT_SCREEN_ON
+        flush(output_unit)
+    end subroutine enter_alt_screen
+
+    subroutine exit_alt_screen()
+        ! Return to main screen buffer
+        write(output_unit, '(a)', advance='no') ALT_SCREEN_OFF
+        flush(output_unit)
+    end subroutine exit_alt_screen
+
+    subroutine hide_cursor()
+        ! Hide the cursor
+        write(output_unit, '(a)', advance='no') CURSOR_HIDE
+        flush(output_unit)
+    end subroutine hide_cursor
+
+    subroutine show_cursor()
+        ! Show the cursor
+        write(output_unit, '(a)', advance='no') CURSOR_SHOW
+        flush(output_unit)
+    end subroutine show_cursor
 
     subroutine read_arrow_key(k)
         character(len=1), intent(out) :: k
