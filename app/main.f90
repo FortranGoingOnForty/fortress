@@ -51,24 +51,32 @@ program fortress
     logical, dimension(MAX_FILES) :: current_is_favorite, parent_is_favorite
 
     character(len=1) :: key
-    integer :: i, rows, cols, visible_height
+    integer :: i, rows, cols, visible_height, top_padding
     logical :: is_shift_pressed
+    character(len=256) :: term_program
 
     ! Initialize
     current_dir = get_pwd()
     parent_dir = get_parent_path(current_dir)
     call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
     call load_favorites(favorite_dirs, favorite_count)
+
+    ! Detect terminal type once for consistent padding throughout
+    call get_environment_variable("TERM_PROGRAM", term_program)
+    if (index(term_program, "WezTerm") > 0 .or. index(term_program, "ghostty") > 0) then
+        top_padding = 2  ! WezTerm/Ghostty need 2 lines to prevent top cutoff
+    else if (index(term_program, "Apple_Terminal") > 0 .or. index(term_program, "iTerm") > 0) then
+        top_padding = 2  ! Terminal.app and iTerm2 need 2 lines
+    else
+        top_padding = 1  ! Other terminals need 1 line
+    end if
+
     call setup_raw_mode()
     call enter_alt_screen()  ! Use alternate screen buffer to prevent scrolling issues
     call hide_cursor()  ! Hide cursor for cleaner display
 
-    ! Reset scroll region and clear completely
-    write(output_unit, '(a)', advance='no') ESC // "[r"  ! Disable scroll region
-    write(output_unit, '(a)', advance='no') ESC // "[1;1H"  ! Position at 1,1
-    write(output_unit, '(a)', advance='no') ESC // "[2J"  ! Clear screen
-    write(output_unit, '(a)') ""  ! Write a blank line to ensure we're at row 2
-    write(output_unit, '(a)', advance='no') ESC // "[1;1H"  ! Go back to 1,1
+    ! Clear screen and position at home
+    write(output_unit, '(a)', advance='no') CLEAR
     flush(output_unit)
 
     ! Initialize selection array to false
@@ -118,9 +126,11 @@ program fortress
         call mark_favorites_in_lists(parent_dir, parent_files, parent_count, parent_is_dir, &
                                      favorite_dirs, favorite_count, parent_is_favorite)
 
-        ! Get terminal size
+        ! Get terminal size and calculate visible height accounting for padding and 2-line header
+        ! Layout: top_padding + header(2 lines) + vis_h + footer(1 line) = rows
+        ! So: vis_h = rows - top_padding - 3
         call get_term_size(rows, cols)
-        visible_height = rows - 3
+        visible_height = rows - top_padding - 3
 
         ! Handle navigation signals from previous iteration
         if (selected == -1) then
@@ -169,12 +179,10 @@ program fortress
             parent_scroll_offset = max(0, min(parent_scroll_offset, max(0, parent_count - visible_height)))
         end if
 
-        ! Draw - reset scroll region, position at 1,1, then clear
-        write(output_unit, '(a)', advance='no') ESC // "[r"  ! Reset scroll region
-        write(output_unit, '(a)', advance='no') ESC // "[1;1H"  ! Position at 1,1
-        write(output_unit, '(a)', advance='no') ESC // "[2J"  ! Clear screen
+        ! Draw - use CLEAR which does move home + clear in one operation
+        write(output_unit, '(a)', advance='no') CLEAR
         flush(output_unit)
-        call draw_interface(rows, cols, current_dir, current_files, current_is_dir, current_is_exec, &
+        call draw_interface(rows, cols, top_padding, current_dir, current_files, current_is_dir, current_is_exec, &
                            current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
                            current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                            selected, parent_selected, scroll_offset, parent_scroll_offset, &
@@ -193,8 +201,22 @@ program fortress
 
         ! Handle input
         select case(ichar(key))
-        case(27)  ! ESC - arrow keys or Shift+arrow keys
+        case(27)  ! ESC - could be arrow keys, Shift+arrow, or standalone ESC
+            ! Read the arrow key sequence first to determine what was pressed
             call read_arrow_key_with_shift(key, is_shift_pressed)
+
+            ! If it's not an arrow key (A/B/C/D), it was a standalone ESC press
+            if (key /= 'A' .and. key /= 'B' .and. key /= 'C' .and. key /= 'D') then
+                ! Standalone ESC - exit multi-select mode if active
+                if (selection_count > 0) then
+                    call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                    selection_anchor = -1
+                    has_disjoint_selection = .false.
+                end if
+                cycle  ! Redraw and wait for next input
+            end if
+
+            ! If we get here, it's an arrow key - continue with normal arrow handling
 
             if (move_mode) then
                 ! In move mode, navigate directories only

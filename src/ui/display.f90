@@ -11,7 +11,7 @@ module ui_display
 
 contains
 
-    subroutine draw_interface(r, c, current_dir, current_files, current_is_dir, current_is_exec, &
+    subroutine draw_interface(r, c, top_padding, current_dir, current_files, current_is_dir, current_is_exec, &
                               current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
                               current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                               selected, parent_selected, scroll_offset, parent_scroll_offset, &
@@ -20,7 +20,7 @@ contains
                               has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
                               is_selected, selection_count, &
                               current_is_favorite, parent_is_favorite)
-        integer, intent(in) :: r, c, current_count, parent_count, selected, parent_selected
+        integer, intent(in) :: r, c, top_padding, current_count, parent_count, selected, parent_selected
         integer, intent(in) :: scroll_offset, parent_scroll_offset
         character(len=*), intent(in) :: current_dir, repo_name, branch_name
         character(len=*), dimension(*), intent(in) :: current_files, parent_files
@@ -37,57 +37,49 @@ contains
         logical, dimension(*), intent(in) :: is_selected
         integer, intent(in) :: selection_count
         logical, dimension(*), intent(in) :: current_is_favorite, parent_is_favorite
-        integer :: left_w, i, parent_idx, current_idx, vis_h, display_len, top_padding
-        character(len=256) :: fname, term_program
+        integer :: left_w, i, parent_idx, current_idx, vis_h, display_len
+        character(len=256) :: fname
         character(len=20) :: color_code
 
-        ! Detect terminal emulator and add appropriate padding
-        ! Most terminals need 1 line, WezTerm/Ghostty need 2
-        call get_environment_variable("TERM_PROGRAM", term_program)
-        if (index(term_program, "WezTerm") > 0 .or. index(term_program, "ghostty") > 0) then
-            top_padding = 2  ! WezTerm/Ghostty need 2 lines of padding
-        else
-            top_padding = 1  ! Most other terminals need 1 line
-        end if
-
         left_w = c * 3 / 10
-        vis_h = r - 3 - top_padding  ! Visible height (reduced by padding if needed)
+        vis_h = r - top_padding - 3  ! Visible height: rows - (top_padding + header(2) + footer(1))
 
         ! Add blank lines at top as padding for terminals that need it
         do i = 1, top_padding
             write(output_unit, '(a)') ""
         end do
 
-        ! Header
+        ! Header - Line 1: Always show path
+        write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir)
+
+        ! Header - Line 2: Status info (always present to prevent shifting)
         if (move_mode) then
-            write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
-                                     " | " // RED // "MOVE: " // trim(move_source_name) // RESET
+            write(output_unit, '(a)') RED // "MOVE: " // trim(move_source_name) // RESET
         else if (selection_count > 0) then
             ! Show selection count
-            write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
-                                     " | " // BLUE // trim(adjustl(itoa(selection_count))) // " selected" // RESET
+            write(output_unit, '(a)') BLUE // trim(adjustl(itoa(selection_count))) // " selected" // RESET
         else if (has_clipboard) then
             if (clipboard_count > 1) then
                 ! Multiple items in clipboard
                 if (clipboard_is_cut) then
-                    write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
-                                             " | " // YELLOW // "CUT: " // trim(adjustl(itoa(clipboard_count))) // " items" // RESET
+                    write(output_unit, '(a)') YELLOW // "CUT: " // trim(adjustl(itoa(clipboard_count))) // " items" // RESET
                 else
-                    write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
-                                             " | " // GREEN // "COPY: " // trim(adjustl(itoa(clipboard_count))) // " items" // RESET
+                    write(output_unit, '(a)') GREEN // "COPY: " // trim(adjustl(itoa(clipboard_count))) // " items" // RESET
                 end if
             else
                 ! Single item in clipboard
                 if (clipboard_is_cut) then
-                    write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
-                                             " | " // YELLOW // "CUT: " // trim(clipboard_source_name) // RESET
+                    write(output_unit, '(a)') YELLOW // "CUT: " // trim(clipboard_source_name) // RESET
                 else
-                    write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
-                                             " | " // GREEN // "COPY: " // trim(clipboard_source_name) // RESET
+                    write(output_unit, '(a)') GREEN // "COPY: " // trim(clipboard_source_name) // RESET
                 end if
             end if
+        else if (in_git_repo) then
+            ! Show git repo info when no other status
+            write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // RESET
         else
-            write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir)
+            ! Empty status line to maintain consistent spacing - write a space not empty string
+            write(output_unit, '(a)') " "
         end if
 
         ! Files (render based on scroll offsets)
@@ -184,8 +176,19 @@ contains
                                                   current_has_incoming(current_idx), .true.)
                     end if
                     write(output_unit, '(a)') RESET
+                else if (current_idx == selected .and. .not. move_mode .and. is_selected(current_idx)) then
+                    ! Cursor on a selected item - use bold+underline with original color
+                    write(output_unit, '(a)', advance='no') BOLD // UNDERLINE // trim(color_code) // trim(fname)
+                    ! Add git indicators if in repo
+                    if (in_git_repo) then
+                        call write_git_indicators(current_is_staged(current_idx), &
+                                                  current_is_unstaged(current_idx), &
+                                                  current_is_untracked(current_idx), &
+                                                  current_has_incoming(current_idx), .true.)
+                    end if
+                    write(output_unit, '(a)') RESET
                 else if (current_idx == selected .and. .not. move_mode) then
-                    ! Normal selection cursor (not in move mode) - use bold+underline with original color
+                    ! Normal selection cursor (not selected) - use bold+underline with original color
                     write(output_unit, '(a)', advance='no') BOLD // UNDERLINE // trim(color_code) // trim(fname)
                     ! Add git indicators if in repo
                     if (in_git_repo) then
@@ -223,18 +226,15 @@ contains
             end if
         end do
 
-        ! Footer
+        ! Footer - help text only (status moved to header)
         if (move_mode) then
-            write(output_unit, '(a)') RED // "MOVE MODE: " // RESET // &
-                                     DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root v:move here q:cancel" // RESET
+            write(output_unit, '(a)') DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root v:move here q:cancel" // RESET
         else if (selection_count > 0) then
             ! Selection mode footer - show multi-select help
-            write(output_unit, '(a)') BLUE // "MULTI-SELECT: " // RESET // &
-                                     DIM // "Space:toggle Shift+↑↓:block select y:copy x:cut p:paste r:delete | " // RESET // &
+            write(output_unit, '(a)') DIM // "ESC:exit Space:toggle Shift+↑↓:block y:copy x:cut p:paste r:delete | " // RESET // &
                                      DIM // "→:enter ←:back ~:home /:root c:cd q:quit" // RESET
         else if (in_git_repo) then
-            write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
+            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
         else
             write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
         end if
