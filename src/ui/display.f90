@@ -42,11 +42,11 @@ contains
         character(len=20) :: color_code
 
         left_w = c * 3 / 10
-        vis_h = r - top_padding - 3  ! Visible height: rows - (top_padding + header(2) + footer(1))
+        vis_h = r - top_padding - 4  ! Visible height with buffer to prevent scrolling
 
         ! Add blank lines at top as padding for terminals that need it
         do i = 1, top_padding
-            write(output_unit, '(a)') ""
+            write(output_unit, '()')  ! Write blank line with explicit format
         end do
 
         ! Header - Line 1: Always show path
@@ -78,8 +78,8 @@ contains
             ! Show git repo info when no other status
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // RESET
         else
-            ! Empty status line to maintain consistent spacing - write a space not empty string
-            write(output_unit, '(a)') " "
+            ! Empty status line to maintain consistent 2-line header
+            write(output_unit, '()')
         end if
 
         ! Files (render based on scroll offsets)
@@ -231,7 +231,7 @@ contains
             write(output_unit, '(a)') DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root v:move here q:cancel" // RESET
         else if (selection_count > 0) then
             ! Selection mode footer - show multi-select help
-            write(output_unit, '(a)') DIM // "ESC:exit Space:toggle Shift+↑↓:block y:copy x:cut p:paste r:delete | " // RESET // &
+            write(output_unit, '(a)') DIM // "Ctrl-D:deselect Space:toggle Shift+↑↓:block y:copy x:cut p:paste r:delete | " // RESET // &
                                      DIM // "→:enter ←:back ~:home /:root c:cd q:quit" // RESET
         else if (in_git_repo) then
             write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET

@@ -64,7 +64,7 @@ program fortress
     ! Detect terminal type once for consistent padding throughout
     call get_environment_variable("TERM_PROGRAM", term_program)
     if (index(term_program, "WezTerm") > 0 .or. index(term_program, "ghostty") > 0) then
-        top_padding = 2  ! WezTerm/Ghostty need 2 lines to prevent top cutoff
+        top_padding = 1  ! WezTerm/Ghostty: 1 line padding (minimal but keeps FORTRESS visible)
     else if (index(term_program, "Apple_Terminal") > 0 .or. index(term_program, "iTerm") > 0) then
         top_padding = 2  ! Terminal.app and iTerm2 need 2 lines
     else
@@ -76,7 +76,8 @@ program fortress
     call hide_cursor()  ! Hide cursor for cleaner display
 
     ! Clear screen and position at home
-    write(output_unit, '(a)', advance='no') CLEAR
+    write(output_unit, '(a)', advance='no') ESC // "[H"   ! Move to home (1,1)
+    write(output_unit, '(a)', advance='no') ESC // "[J"   ! Clear from cursor to end
     flush(output_unit)
 
     ! Initialize selection array to false
@@ -127,10 +128,10 @@ program fortress
                                      favorite_dirs, favorite_count, parent_is_favorite)
 
         ! Get terminal size and calculate visible height accounting for padding and 2-line header
-        ! Layout: top_padding + header(2 lines) + vis_h + footer(1 line) = rows
-        ! So: vis_h = rows - top_padding - 3
+        ! Layout: top_padding + header(2 lines) + vis_h + footer(1 line) + buffer = rows
+        ! Subtract 1 extra to prevent any scrolling: vis_h = rows - top_padding - 4
         call get_term_size(rows, cols)
-        visible_height = rows - top_padding - 3
+        visible_height = rows - top_padding - 4
 
         ! Handle navigation signals from previous iteration
         if (selected == -1) then
@@ -179,8 +180,9 @@ program fortress
             parent_scroll_offset = max(0, min(parent_scroll_offset, max(0, parent_count - visible_height)))
         end if
 
-        ! Draw - use CLEAR which does move home + clear in one operation
-        write(output_unit, '(a)', advance='no') CLEAR
+        ! Draw - position at 1,1 then clear from cursor to end (prevents scrollback)
+        write(output_unit, '(a)', advance='no') ESC // "[H"   ! Move to home (1,1)
+        write(output_unit, '(a)', advance='no') ESC // "[J"   ! Clear from cursor to end of screen
         flush(output_unit)
         call draw_interface(rows, cols, top_padding, current_dir, current_files, current_is_dir, current_is_exec, &
                            current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
