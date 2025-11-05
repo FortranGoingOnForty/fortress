@@ -203,7 +203,7 @@ program fortress
 
         ! Handle input
         select case(ichar(key))
-        case(27)  ! ESC - could be arrow keys, Shift+arrow, or standalone ESC
+        case(27)  ! ESC - could be arrow keys, Shift+arrow, or standalone ESC to clear selections
             ! Read the arrow key sequence first to determine what was pressed
             call read_arrow_key_with_shift(key, is_shift_pressed)
 
@@ -467,6 +467,12 @@ program fortress
                 selection_anchor = -1
                 call clear_all_selections(is_selected, selection_count, in_selection_mode)
                 call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+            end if
+        case(4)  ! Ctrl-D - clear multi-select (deselect all)
+            if (selection_count > 0) then
+                call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                selection_anchor = -1
+                has_disjoint_selection = .false.
             end if
         case(32)  ! Space - toggle selection on current item
             if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
