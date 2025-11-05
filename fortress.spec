@@ -1,5 +1,5 @@
 Name:           fortress
-Version:        0.9.98
+Version:        0.9.99
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -103,6 +103,10 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Wed Oct 29 2025 mfw <espadon@outlook.com> - 0.9.99-1
+- Add conditional rows for WezTerm and Ghostty terminals
+- Fix alignment of pipes on favorited directories
+
 * Wed Oct 29 2025 mfw <espadon@outlook.com> - 0.9.98-1
 - Merge favorites branch into trunk
 - Ensures all features (favorites, jump binds) are in trunk
