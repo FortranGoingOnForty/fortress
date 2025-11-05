@@ -1,8 +1,8 @@
 class Fortress < Formula
   desc "Command-line file explorer written in modern Fortran with cd-on-exit"
   homepage "https://github.com/FortranGoingOnForty/fortress"
-  url "https://github.com/FortranGoingOnForty/fortress/archive/v0.9.98.tar.gz"
-  sha256 "1277da133881509d4cf5b76f8529ac8977df659300e432cdf4e519e12edbc684"
+  url "https://github.com/FortranGoingOnForty/fortress/archive/v0.9.99.tar.gz"
+  sha256 "5eb08ae980e3e4d3469510eda0c5d325db831ab8f3ac3146befd51efa929245f"
   license "MIT"
 
   depends_on "fpm" => :build
