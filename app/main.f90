@@ -105,7 +105,7 @@ program fortress
 
         ! Get terminal size
         call get_term_size(rows, cols)
-        visible_height = rows - 3
+        visible_height = rows - 6  ! Account for 2 pre-spacing + header + 2 post-spacing + footer
 
         ! Handle navigation signals from previous iteration
         if (selected == -1) then
@@ -440,6 +440,11 @@ program fortress
                 selection_anchor = -1
                 ! Check if we have disjoint selections
                 call check_disjoint_selection(is_selected, current_count, has_disjoint_selection)
+            end if
+        case(69, 101)  ! 'E' or 'e' - exit/clear multi-select mode
+            if (selection_count > 0) then
+                call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                selection_anchor = -1
             end if
         case(86, 118)  ! 'V' or 'v' - enter move mode OR confirm move
             if (move_mode) then
@@ -1305,7 +1310,7 @@ contains
         call execute_command_line("rm -f ~/.fortress_fav_temp ~/.fortress_fav_select 2>/dev/null")
 
         ! Re-enable raw mode
-        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
+        call setup_raw_mode()
     end subroutine add_favorite_with_replacement
 
     subroutine mark_favorites_in_lists(current_dir, files, count, is_dir, favs, fav_count, is_fav)
@@ -1389,7 +1394,7 @@ contains
         call execute_command_line("rm -f ~/.fortress_fav_picker ~/.fortress_fav_selected 2>/dev/null")
 
         ! Re-enable raw mode
-        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
+        call setup_raw_mode()
     end subroutine open_favorites_picker
 
 end program fortress

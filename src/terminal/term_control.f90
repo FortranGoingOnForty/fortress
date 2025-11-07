@@ -4,6 +4,8 @@ module terminal_control
     private
 
     public :: get_term_size, setup_raw_mode, restore_terminal, read_arrow_key, read_arrow_key_with_shift
+    public :: enable_read_timeout, disable_read_timeout
+    public :: needs_extra_spacing
     public :: ESC, CLEAR, BOLD, DIM, REVERSE, RESET
     public :: BLUE, GREEN, RED, GREY, WHITE, YELLOW
     public :: invalidate_term_cache
@@ -84,12 +86,52 @@ contains
     end subroutine get_term_size
 
     subroutine setup_raw_mode()
-        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+        ! Blocking mode for stable operation
+        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
     end subroutine setup_raw_mode
+
+    subroutine enable_read_timeout()
+        ! No-op for now
+    end subroutine enable_read_timeout
+
+    subroutine disable_read_timeout()
+        ! No-op for now
+    end subroutine disable_read_timeout
 
     subroutine restore_terminal()
         call execute_command_line("stty icanon echo 2>/dev/null")
     end subroutine restore_terminal
+
+    function needs_extra_spacing() result(needs_spacing)
+        logical :: needs_spacing
+        character(len=256) :: term_var, alacritty_var
+        integer :: stat
+
+        needs_spacing = .false.
+
+        ! Check TERM environment variable
+        call get_environment_variable("TERM", term_var, status=stat)
+        if (stat == 0) then
+            ! Check if TERM contains "alacritty" or other terminals that need spacing
+            if (index(term_var, "alacritty") > 0) then
+                needs_spacing = .true.
+                return
+            end if
+        end if
+
+        ! Also check for ALACRITTY_SOCKET or ALACRITTY_LOG to detect alacritty
+        call get_environment_variable("ALACRITTY_SOCKET", alacritty_var, status=stat)
+        if (stat == 0 .and. len_trim(alacritty_var) > 0) then
+            needs_spacing = .true.
+            return
+        end if
+
+        call get_environment_variable("ALACRITTY_LOG", alacritty_var, status=stat)
+        if (stat == 0 .and. len_trim(alacritty_var) > 0) then
+            needs_spacing = .true.
+            return
+        end if
+    end function needs_extra_spacing
 
     subroutine read_arrow_key(k)
         character(len=1), intent(out) :: k
