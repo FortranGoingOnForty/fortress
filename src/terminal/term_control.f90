@@ -6,8 +6,9 @@ module terminal_control
     public :: get_term_size, setup_raw_mode, restore_terminal, read_arrow_key, read_arrow_key_with_shift
     public :: enable_read_timeout, disable_read_timeout
     public :: needs_extra_spacing
+    public :: read_key_with_modifiers
     public :: ESC, CLEAR, BOLD, DIM, REVERSE, RESET
-    public :: BLUE, GREEN, RED, GREY, WHITE, YELLOW
+    public :: BLUE, GREEN, RED, GREY, WHITE, YELLOW, CYAN
     public :: invalidate_term_cache
 
     ! ANSI escape codes
@@ -23,6 +24,7 @@ module terminal_control
     character(len=*), parameter :: GREY = ESC // "[90m"
     character(len=*), parameter :: WHITE = ESC // "[37m"
     character(len=*), parameter :: YELLOW = ESC // "[33m"
+    character(len=*), parameter :: CYAN = ESC // "[36m"
 
     ! Terminal size cache
     integer, save :: cached_rows = 0
@@ -186,5 +188,53 @@ contains
         ! If we get here, it's some other sequence, treat as regular arrow
         k = ch2
     end subroutine read_arrow_key_with_shift
+
+    subroutine read_key_with_modifiers(k, is_shift, is_alt)
+        character(len=1), intent(out) :: k
+        logical, intent(out) :: is_shift, is_alt
+        character(len=1) :: ch1, ch2, ch3, ch4
+
+        is_shift = .false.
+        is_alt = .false.
+        k = ' '
+
+        ! Read first character after ESC
+        read(*, '(a1)', advance='no') ch1
+
+        if (ch1 == '[') then
+            ! Arrow key sequence
+            read(*, '(a1)', advance='no') ch2
+
+            if (ch2 == 'A' .or. ch2 == 'B' .or. ch2 == 'C' .or. ch2 == 'D') then
+                ! Simple arrow
+                k = ch2
+                return
+            end if
+
+            ! Check for Shift+Arrow: [1;2X
+            if (ch2 == '1') then
+                read(*, '(a1)', advance='no') ch3
+                if (ch3 == ';') then
+                    read(*, '(a1)', advance='no') ch4
+                    if (ch4 == '2') then
+                        read(*, '(a1)', advance='no') k
+                        is_shift = .true.
+                        return
+                    end if
+                end if
+            end if
+
+            ! Fallback: treat as regular arrow
+            k = ch2
+        else if (ch1 >= 'a' .and. ch1 <= 'z') then
+            ! Alt+letter sequence: ESC followed by lowercase letter
+            ! Encode as achar(1..26)
+            k = achar(1 + ichar(ch1) - ichar('a'))
+            is_alt = .true.
+        else
+            ! Just a standalone ESC or other sequence
+            k = ch1
+        end if
+    end subroutine read_key_with_modifiers
 
 end module terminal_control

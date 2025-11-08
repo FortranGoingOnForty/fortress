@@ -21,6 +21,15 @@ program fortress
     logical :: in_git_repo = .false., running = .true., cd_on_exit = .false.
     logical :: show_dotfiles = .true.
 
+    ! Mode state (normal or git)
+    character(len=10) :: mode = 'normal'
+
+    ! Fuzzy search state
+    character(len=32) :: search_buffer = ''
+    integer :: search_length = 0
+    integer(8) :: last_search_tick = 0
+    integer(8) :: clock_rate, current_tick
+
     ! Move mode state
     logical :: move_mode = .false.
     character(len=MAX_PATH) :: move_source_path
@@ -52,13 +61,14 @@ program fortress
 
     character(len=1) :: key
     integer :: i, rows, cols, visible_height
-    logical :: is_shift_pressed
+    logical :: is_shift_pressed, is_alt_pressed
 
     ! Initialize
     current_dir = get_pwd()
     parent_dir = get_parent_path(current_dir)
     call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
     call load_favorites(favorite_dirs, favorite_count)
+    call system_clock(count_rate=clock_rate)
     call setup_raw_mode()
 
     ! Main loop
@@ -160,11 +170,12 @@ program fortress
                            current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
                            current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                            selected, parent_selected, scroll_offset, parent_scroll_offset, &
-                           in_git_repo, repo_name, branch_name, &
+                           in_git_repo, repo_name, branch_name, mode, &
                            move_mode, move_source_name, move_dest_selected, &
                            has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
                            is_selected, selection_count, &
-                           current_is_favorite, parent_is_favorite)
+                           current_is_favorite, parent_is_favorite, &
+                           search_buffer, search_length)
 
         ! Get input (with error handling for End-of-record after Enter key)
         read(*, '(a1)', advance='no', iostat=i) key
@@ -173,12 +184,62 @@ program fortress
         if (i < 0) cycle  ! End-of-record - skip and try again
         if (i > 0) cycle  ! Other read errors - skip and try again
 
+        ! Fuzzy search: handle printable characters (only in normal mode, no special modes active)
+        if (trim(mode) == 'normal' .and. .not. move_mode .and. selection_count == 0) then
+            ! Check if character is printable (letters, digits, dash, underscore, dot)
+            if ((ichar(key) >= ichar('a') .and. ichar(key) <= ichar('z')) .or. &
+                (ichar(key) >= ichar('A') .and. ichar(key) <= ichar('Z')) .or. &
+                (ichar(key) >= ichar('0') .and. ichar(key) <= ichar('9')) .or. &
+                key == '-' .or. key == '_' .or. key == '.') then
+
+                ! Check timeout (0.5 seconds = clock_rate / 2)
+                if (search_length > 0) then
+                    call system_clock(current_tick)
+                    if (current_tick - last_search_tick > clock_rate / 2) then
+                        ! Timeout - clear buffer and start fresh
+                        search_length = 0
+                        search_buffer = ''
+                    end if
+                end if
+
+                ! Add to buffer
+                if (search_length < 32) then
+                    search_length = search_length + 1
+                    search_buffer(search_length:search_length) = key
+                    call system_clock(last_search_tick)
+
+                    ! Perform fuzzy jump
+                    call fuzzy_jump(current_files, current_count, search_buffer(1:search_length), selected)
+                end if
+                cycle  ! Skip normal key processing
+            else if (ichar(key) == 127 .or. ichar(key) == 8) then
+                ! Backspace - remove last character from search
+                if (search_length > 0) then
+                    search_length = search_length - 1
+                    call system_clock(last_search_tick)
+                    if (search_length > 0) then
+                        call fuzzy_jump(current_files, current_count, search_buffer(1:search_length), selected)
+                    end if
+                end if
+                cycle
+            end if
+        end if
+
         ! Handle input
         select case(ichar(key))
-        case(27)  ! ESC - arrow keys or Shift+arrow keys
-            call read_arrow_key_with_shift(key, is_shift_pressed)
+        case(27)  ! ESC - arrow keys, Shift+arrow keys, or Alt+key
+            ! Clear search buffer if active (but still process the arrow key)
+            if (search_length > 0) then
+                search_length = 0
+                search_buffer = ''
+            end if
 
-            if (move_mode) then
+            call read_key_with_modifiers(key, is_shift_pressed, is_alt_pressed)
+
+            ! Handle Alt+key combinations - skip arrow processing and handle below
+            if (.not. is_alt_pressed) then
+                ! Process arrow keys normally
+                if (move_mode) then
                 ! In move mode, navigate directories only
                 select case(key)
                 case('A')  ! Up - jump to previous directory
@@ -276,13 +337,32 @@ program fortress
                     end if
                 end select
             end if
-        case(113, 81)  ! 'q' or 'Q' - exit move mode or quit
+            end if  ! End of .not. is_alt_pressed check
+        case(7)  ! Alt+g - toggle git mode
+            if (in_git_repo) then
+                if (mode == 'normal') then
+                    mode = 'git'
+                else
+                    mode = 'normal'
+                end if
+            end if
+        case(14)  ! Alt+n - rename file/directory
+            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                call rename_file_prompt(current_dir, current_files(selected))
+            end if
+        case(22)  ! Alt+v - view file (always available)
+            if (.not. current_is_dir(selected)) then
+                if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                    call open_file_in_default_app(join_path(current_dir, current_files(selected)))
+                end if
+            end if
+        case(113, 81)  ! 'q' or 'Q' - exit move mode
             if (move_mode) then
                 move_mode = .false.
-            else
-                running = .false.
             end if
-        case(99, 67)  ! 'c' or 'C' - cd to directory on exit
+        case(17)  ! Ctrl-q - quit program
+            running = .false.
+        case(3)  ! Alt+c - cd to directory on exit
             if (current_is_dir(selected)) then
                 if (trim(current_files(selected)) == "..") then
                     exit_dir = parent_dir
@@ -294,7 +374,7 @@ program fortress
                 cd_on_exit = .true.
                 running = .false.
             end if
-        case(83, 115)  ! 'S' or 's' - fzf search (moved from 'f')
+        case(19)  ! Alt+s - fzf search
             call fzf_search(current_dir, temp_dir)
             if (len_trim(temp_dir) > 0) then
                 parent_dir = get_parent_path(temp_dir)
@@ -304,13 +384,13 @@ program fortress
                 call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
             end if
         case(65, 97)  ! 'A' or 'a' - git add (batch stage directories)
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                     call git_add_file(current_dir, current_files(selected))
                 end if
             end if
         case(85, 117)  ! 'U' or 'u' - git unstage (batch unstage directories)
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                     if (current_is_staged(selected)) then
                         call git_unstage_file(current_dir, current_files(selected))
@@ -318,37 +398,27 @@ program fortress
                 end if
             end if
         case(77, 109)  ! 'M' or 'm' - git commit
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 call git_commit_prompt(current_dir, repo_name)
             end if
         case(72, 104)  ! 'H' or 'h' - git push (h for "push to remote Host")
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 call git_push_prompt(current_dir, repo_name)
             end if
         case(84, 116)  ! 'T' or 't' - git tag
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 call git_tag_prompt(current_dir, repo_name)
             end if
         case(70, 102)  ! 'F' or 'f' - git fetch
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 call git_fetch_prompt(current_dir, repo_name)
             end if
         case(76, 108)  ! 'L' or 'l' - git pull
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 call git_pull_prompt(current_dir, repo_name)
             end if
-        case(79, 111)  ! 'O' or 'o' - open file
-            if (.not. current_is_dir(selected)) then
-                if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
-                    call open_file_in_default_app(join_path(current_dir, current_files(selected)))
-                end if
-            end if
-        case(78, 110)  ! 'N' or 'n' - rename file/directory
-            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
-                call rename_file_prompt(current_dir, current_files(selected))
-            end if
         case(68, 100)  ! 'D' or 'd' - show git diff
-            if (in_git_repo .and. .not. current_is_dir(selected)) then
+            if (in_git_repo .and. trim(mode) == 'git' .and. .not. current_is_dir(selected)) then
                 if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                     if (current_is_staged(selected) .or. current_is_unstaged(selected)) then
                         call show_git_diff_fullscreen(current_dir, current_files(selected), &
@@ -356,7 +426,7 @@ program fortress
                     end if
                 end if
             end if
-        case(82, 114)  ! 'R' or 'r' - delete/remove with confirmation
+        case(18)  ! Alt+r - delete/remove with confirmation
             if (selection_count > 0) then
                 ! Delete multiple selections
                 call delete_multi_with_confirmation(current_dir, current_files, current_is_dir, &
@@ -441,12 +511,7 @@ program fortress
                 ! Check if we have disjoint selections
                 call check_disjoint_selection(is_selected, current_count, has_disjoint_selection)
             end if
-        case(69, 101)  ! 'E' or 'e' - exit/clear multi-select mode
-            if (selection_count > 0) then
-                call clear_all_selections(is_selected, selection_count, in_selection_mode)
-                selection_anchor = -1
-            end if
-        case(86, 118)  ! 'V' or 'v' - enter move mode OR confirm move
+        case(13)  ! Alt+m - enter move mode OR confirm move
             if (move_mode) then
                 ! Confirm move - execute the move to the white-highlighted directory
                 call execute_move_file(move_source_path, current_dir, current_files(move_dest_selected), &
@@ -460,7 +525,12 @@ program fortress
                 ! Find first directory for destination cursor
                 move_dest_selected = find_first_directory(current_files, current_is_dir, current_count)
             end if
-        case(89, 121)  ! 'Y' or 'y' - yank/copy to clipboard
+        case(69, 101)  ! 'E' or 'e' - exit/clear multi-select mode
+            if (selection_count > 0) then
+                call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                selection_anchor = -1
+            end if
+        case(25)  ! Alt+y - yank/copy to clipboard
             if (selection_count > 0) then
                 ! Copy multiple selections
                 clipboard_count = 0
@@ -486,7 +556,7 @@ program fortress
                 clipboard_is_cut = .false.
                 has_clipboard = .true.
             end if
-        case(88, 120)  ! 'X' or 'x' - cut to clipboard
+        case(24)  ! Alt+x - cut to clipboard
             if (selection_count > 0) then
                 ! Cut multiple selections
                 clipboard_count = 0
@@ -512,7 +582,7 @@ program fortress
                 clipboard_is_cut = .true.
                 has_clipboard = .true.
             end if
-        case(80, 112)  ! 'P' or 'p' - paste from clipboard
+        case(16)  ! Alt+p - paste from clipboard
             if (has_clipboard) then
                 if (clipboard_count > 1) then
                     ! Paste multiple items
@@ -1396,5 +1466,140 @@ contains
         ! Re-enable raw mode
         call setup_raw_mode()
     end subroutine open_favorites_picker
+
+    subroutine fuzzy_jump(files, count, pattern, selected)
+        character(len=*), dimension(*), intent(in) :: files
+        integer, intent(in) :: count
+        character(len=*), intent(in) :: pattern
+        integer, intent(inout) :: selected
+        integer :: i, score, best_score, best_idx
+        character(len=256) :: pattern_lower, filename_lower
+
+        if (len_trim(pattern) == 0) return
+
+        best_score = -1
+        best_idx = selected
+
+        ! Convert pattern to lowercase
+        pattern_lower = pattern
+        call to_lowercase(pattern_lower)
+
+        ! Search for best match
+        do i = 1, count
+            ! Skip "." and ".."
+            if (trim(files(i)) == "." .or. trim(files(i)) == "..") cycle
+
+            ! Convert filename to lowercase
+            filename_lower = files(i)
+            call to_lowercase(filename_lower)
+
+            ! Get fuzzy match score
+            score = fuzzy_score(pattern_lower, filename_lower)
+
+            if (score > best_score) then
+                best_score = score
+                best_idx = i
+            end if
+        end do
+
+        ! Jump to best match if we found something
+        if (best_score >= 0) then
+            selected = best_idx
+        end if
+    end subroutine fuzzy_jump
+
+    function fuzzy_score(pattern, text) result(score)
+        character(len=*), intent(in) :: pattern, text
+        integer :: score
+        integer :: i, j, pat_len, text_len, consecutive
+        logical :: match_found
+        character(len=256) :: pattern_trim, text_trim
+
+        pattern_trim = trim(pattern)
+        text_trim = trim(text)
+        pat_len = len_trim(pattern_trim)
+        text_len = len_trim(text_trim)
+
+        if (pat_len == 0) then
+            score = 0
+            return
+        end if
+
+        ! Exact match (highest priority)
+        if (pattern_trim == text_trim) then
+            score = 10000
+            return
+        end if
+
+        ! Prefix match (very high priority)
+        if (text_len >= pat_len) then
+            if (text_trim(1:pat_len) == pattern_trim) then
+                score = 5000
+                return
+            end if
+        end if
+
+        ! Fuzzy match with scoring
+        score = 0
+        consecutive = 0
+        j = 1
+
+        do i = 1, pat_len
+            match_found = .false.
+            do while (j <= text_len)
+                if (pattern_trim(i:i) == text_trim(j:j)) then
+                    ! Base score for character match
+                    score = score + 100
+
+                    ! Bonus for consecutive characters
+                    if (consecutive > 0) then
+                        score = score + 50
+                    end if
+                    consecutive = consecutive + 1
+
+                    ! Bonus for match at start
+                    if (j == i) then
+                        score = score + 200
+                    end if
+
+                    ! Bonus for word boundary (after /, -, _, .)
+                    if (j > 1) then
+                        if (text_trim(j-1:j-1) == '/' .or. text_trim(j-1:j-1) == '-' .or. &
+                            text_trim(j-1:j-1) == '_' .or. text_trim(j-1:j-1) == '.') then
+                            score = score + 150
+                        end if
+                    end if
+
+                    j = j + 1
+                    match_found = .true.
+                    exit
+                else
+                    consecutive = 0
+                    j = j + 1
+                end if
+            end do
+
+            ! If character not found, no match
+            if (.not. match_found) then
+                score = -1
+                return
+            end if
+        end do
+
+        ! Penalty for length (prefer shorter matches)
+        score = score - (text_len - pat_len)
+    end function fuzzy_score
+
+    subroutine to_lowercase(str)
+        character(len=*), intent(inout) :: str
+        integer :: i, char_code
+
+        do i = 1, len_trim(str)
+            char_code = ichar(str(i:i))
+            if (char_code >= ichar('A') .and. char_code <= ichar('Z')) then
+                str(i:i) = achar(char_code + 32)
+            end if
+        end do
+    end subroutine to_lowercase
 
 end program fortress

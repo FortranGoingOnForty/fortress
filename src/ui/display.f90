@@ -14,14 +14,15 @@ contains
                               current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
                               current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                               selected, parent_selected, scroll_offset, parent_scroll_offset, &
-                              in_git_repo, repo_name, branch_name, &
+                              in_git_repo, repo_name, branch_name, mode, &
                               move_mode, move_source_name, move_dest_selected, &
                               has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
                               is_selected, selection_count, &
-                              current_is_favorite, parent_is_favorite)
+                              current_is_favorite, parent_is_favorite, &
+                              search_buffer, search_length)
         integer, intent(in) :: r, c, current_count, parent_count, selected, parent_selected
         integer, intent(in) :: scroll_offset, parent_scroll_offset
-        character(len=*), intent(in) :: current_dir, repo_name, branch_name
+        character(len=*), intent(in) :: current_dir, repo_name, branch_name, mode
         character(len=*), dimension(*), intent(in) :: current_files, parent_files
         logical, dimension(*), intent(in) :: current_is_dir, parent_is_dir
         logical, dimension(*), intent(in) :: current_is_exec, parent_is_exec
@@ -36,6 +37,8 @@ contains
         logical, dimension(*), intent(in) :: is_selected
         integer, intent(in) :: selection_count
         logical, dimension(*), intent(in) :: current_is_favorite, parent_is_favorite
+        character(len=*), intent(in) :: search_buffer
+        integer, intent(in) :: search_length
         integer :: left_w, i, parent_idx, current_idx, vis_h, display_len
         character(len=256) :: fname
         character(len=20) :: color_code
@@ -75,6 +78,15 @@ contains
                                              " | " // GREEN // "COPY: " // trim(clipboard_source_name) // RESET
                 end if
             end if
+        else if (in_git_repo .and. trim(mode) == 'git') then
+            ! Show git mode indicator
+            write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
+                                     " | " // CYAN // trim(repo_name) // ":" // YELLOW // trim(branch_name) // " " // &
+                                     YELLOW // BOLD // "[ GIT MODE ]" // RESET
+        else if (in_git_repo) then
+            ! Show repo info without mode indicator
+            write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
+                                     " | " // CYAN // trim(repo_name) // ":" // YELLOW // trim(branch_name) // RESET
         else
             write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir)
         end if
@@ -222,17 +234,30 @@ contains
         ! Footer
         if (move_mode) then
             write(output_unit, '(a)') RED // "MOVE MODE: " // RESET // &
-                                     DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root v:move here q:cancel" // RESET
+                                     DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root alt-m:move here q:cancel" // RESET
         else if (selection_count > 0) then
             ! Selection mode footer - show multi-select help
             write(output_unit, '(a)') BLUE // "MULTI-SELECT: " // RESET // &
-                                     DIM // "Space:toggle Shift+↑↓:block select y:copy x:cut p:paste r:delete | " // RESET // &
-                                     DIM // "→:enter ←:back ~:home /:root c:cd q:quit" // RESET
+                                     DIM // "Space:toggle Shift+↑↓:block e:exit | alt-y:copy alt-x:cut alt-p:paste alt-r:delete | " // &
+                                     "→:enter ←:back ~:home /:root alt-c:cd ctrl-q:quit" // RESET
+        else if (in_git_repo .and. trim(mode) == 'git') then
+            ! Git mode footer - show git operations in yellow
+            write(output_unit, '(a)') YELLOW // trim(repo_name) // ":" // trim(branch_name) // " [ GIT MODE ]" // RESET // " | " // &
+                                     YELLOW // "a:add u:unstage m:commit h:push l:pull f:fetch d:diff t:tag" // RESET // " | " // &
+                                     DIM // "Space:select ↑↓:nav →:enter ←:back ~:home /:root 8:fav *:star " // &
+                                     "alt-n:rename alt-v:view alt-m:move alt-y:copy alt-x:cut alt-p:paste alt-r:delete .:hidden " // &
+                                     "alt-s:search alt-g:exit-mode alt-c:cd ctrl-q:quit" // RESET
         else if (in_git_repo) then
-            write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // RESET // &
-                                     DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
+            ! Normal mode in git repo - show alt-g to enter git mode
+            write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // &
+                                     "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root " // &
+                                     "8:fav *:star alt-n:rename alt-v:view alt-m:move alt-y:copy alt-x:cut alt-p:paste alt-r:delete " // &
+                                     ".:hidden alt-s:search alt-g:git-mode alt-c:cd ctrl-q:quit" // RESET
         else
-            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
+            ! Non-git repo footer
+            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root " // &
+                                     "8:fav *:star alt-n:rename alt-v:view alt-m:move alt-y:copy alt-x:cut alt-p:paste alt-r:delete " // &
+                                     ".:hidden alt-s:search alt-c:cd ctrl-q:quit" // RESET
         end if
 
     contains
