@@ -19,7 +19,8 @@ contains
                               has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
                               is_selected, selection_count, &
                               current_is_favorite, parent_is_favorite, &
-                              search_buffer, search_length)
+                              search_buffer, search_length, &
+                              in_rename_mode, rename_buffer, rename_cursor_pos)
         integer, intent(in) :: r, c, current_count, parent_count, selected, parent_selected
         integer, intent(in) :: scroll_offset, parent_scroll_offset
         character(len=*), intent(in) :: current_dir, repo_name, branch_name, mode
@@ -39,6 +40,9 @@ contains
         logical, dimension(*), intent(in) :: current_is_favorite, parent_is_favorite
         character(len=*), intent(in) :: search_buffer
         integer, intent(in) :: search_length
+        logical, intent(in) :: in_rename_mode
+        character(len=*), intent(in) :: rename_buffer
+        integer, intent(in) :: rename_cursor_pos
         integer :: left_w, i, parent_idx, current_idx, vis_h, display_len
         character(len=256) :: fname
         character(len=20) :: color_code
@@ -47,7 +51,10 @@ contains
         vis_h = r - 2  ! Visible height (header + footer)
 
         ! Header
-        if (move_mode) then
+        if (in_rename_mode) then
+            write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
+                                     " | " // YELLOW // "RENAME MODE" // RESET
+        else if (move_mode) then
             write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir) // &
                                      " | " // RED // "MOVE: " // trim(move_source_name) // RESET
         else if (selection_count > 0) then
@@ -179,22 +186,55 @@ contains
                     write(output_unit, '(a)') RESET
                 else if (current_idx == selected .and. .not. move_mode) then
                     ! Normal selection cursor (not in move mode)
-                    ! If file is cut, show selected with red background instead of default color
-                    ! Only highlight for single-item cuts (multi-cuts shown in header)
-                    if (has_clipboard .and. clipboard_is_cut .and. clipboard_count == 1 .and. &
+                    ! Check if in rename mode - show editable buffer with cursor
+                    if (in_rename_mode) then
+                        ! Show rename buffer with block cursor (█) at cursor position
+                        if (current_is_favorite(current_idx)) then
+                            write(output_unit, '(a)', advance='no') REVERSE // trim(color_code) // "★ "
+                        else
+                            write(output_unit, '(a)', advance='no') REVERSE // trim(color_code)
+                        end if
+
+                        if (rename_cursor_pos == len_trim(rename_buffer)) then
+                            ! Cursor at end
+                            write(output_unit, '(a)', advance='no') trim(rename_buffer) // '█'
+                        else if (rename_cursor_pos == 0) then
+                            ! Cursor at beginning
+                            write(output_unit, '(a)', advance='no') '█' // trim(rename_buffer)
+                        else
+                            ! Cursor in middle
+                            write(output_unit, '(a)', advance='no') rename_buffer(1:rename_cursor_pos) // '█' // &
+                                   rename_buffer(rename_cursor_pos+1:len_trim(rename_buffer))
+                        end if
+                        if (current_is_dir(current_idx) .and. current_files(current_idx) /= "." .and. &
+                            current_files(current_idx) /= "..") then
+                            write(output_unit, '(a)', advance='no') "/"
+                        end if
+                        write(output_unit, '(a)') RESET
+                    ! Not in rename mode - normal rendering
+                    else if (has_clipboard .and. clipboard_is_cut .and. clipboard_count == 1 .and. &
                         trim(current_files(current_idx)) == trim(clipboard_source_name)) then
+                        ! If file is cut, show selected with red background
                         write(output_unit, '(a)', advance='no') REVERSE // RED // trim(fname)
+                        ! Add git indicators if in repo
+                        if (in_git_repo) then
+                            call write_git_indicators(current_is_staged(current_idx), &
+                                                      current_is_unstaged(current_idx), &
+                                                      current_is_untracked(current_idx), &
+                                                      current_has_incoming(current_idx), .true.)
+                        end if
+                        write(output_unit, '(a)') RESET
                     else
                         write(output_unit, '(a)', advance='no') REVERSE // trim(color_code) // trim(fname)
+                        ! Add git indicators if in repo
+                        if (in_git_repo) then
+                            call write_git_indicators(current_is_staged(current_idx), &
+                                                      current_is_unstaged(current_idx), &
+                                                      current_is_untracked(current_idx), &
+                                                      current_has_incoming(current_idx), .true.)
+                        end if
+                        write(output_unit, '(a)') RESET
                     end if
-                    ! Add git indicators if in repo
-                    if (in_git_repo) then
-                        call write_git_indicators(current_is_staged(current_idx), &
-                                                  current_is_unstaged(current_idx), &
-                                                  current_is_untracked(current_idx), &
-                                                  current_has_incoming(current_idx), .true.)
-                    end if
-                    write(output_unit, '(a)') RESET
                 else if (is_selected(current_idx)) then
                     ! Multi-selected item (not the cursor) - show with cyan background
                     write(output_unit, '(a)', advance='no') REVERSE // trim(color_code) // trim(fname)
@@ -224,7 +264,10 @@ contains
         end do
 
         ! Footer
-        if (move_mode) then
+        if (in_rename_mode) then
+            write(output_unit, '(a)') YELLOW // "RENAME MODE: " // RESET // &
+                                     DIM // "Type to edit | Enter:confirm ESC:cancel" // RESET
+        else if (move_mode) then
             write(output_unit, '(a)') RED // "MOVE MODE: " // RESET // &
                                      DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root alt-m:move here q:cancel" // RESET
         else if (selection_count > 0) then
