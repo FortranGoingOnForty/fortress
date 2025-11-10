@@ -44,11 +44,7 @@ contains
         character(len=20) :: color_code
 
         left_w = c * 3 / 10
-        vis_h = r - 6  ! Visible height (2 pre-spacing + header + 2 post-spacing + footer)
-
-        ! Add spacing at the very top to prevent terminal cutoff
-        write(output_unit, *)
-        write(output_unit, *)
+        vis_h = r - 2  ! Visible height (header + footer)
 
         ! Header
         if (move_mode) then
@@ -90,10 +86,6 @@ contains
         else
             write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir)
         end if
-
-        ! Add extra spacing - many terminals need this to prevent header overlap
-        write(output_unit, *)
-        write(output_unit, *)
 
         ! Files (render based on scroll offsets)
         do i = 1, vis_h

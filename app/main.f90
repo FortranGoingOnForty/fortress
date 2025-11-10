@@ -115,7 +115,7 @@ program fortress
 
         ! Get terminal size
         call get_term_size(rows, cols)
-        visible_height = rows - 6  ! Account for 2 pre-spacing + header + 2 post-spacing + footer
+        visible_height = rows - 2  ! Account for header + footer
 
         ! Handle navigation signals from previous iteration
         if (selected == -1) then

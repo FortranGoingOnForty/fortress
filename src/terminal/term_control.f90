@@ -7,13 +7,15 @@ module terminal_control
     public :: enable_read_timeout, disable_read_timeout
     public :: needs_extra_spacing
     public :: read_key_with_modifiers
-    public :: ESC, CLEAR, BOLD, DIM, REVERSE, RESET
+    public :: ESC, CLEAR, ALT_SCREEN_ON, ALT_SCREEN_OFF, BOLD, DIM, REVERSE, RESET
     public :: BLUE, GREEN, RED, GREY, WHITE, YELLOW, CYAN
     public :: invalidate_term_cache
 
     ! ANSI escape codes
     character(len=*), parameter :: ESC = char(27)
-    character(len=*), parameter :: CLEAR = ESC // "[2J" // ESC // "[H"
+    character(len=*), parameter :: CLEAR = ESC // "[H" // ESC // "[J"  ! Move to home, clear to end
+    character(len=*), parameter :: ALT_SCREEN_ON = ESC // "[?1049h"    ! Enable alt screen buffer
+    character(len=*), parameter :: ALT_SCREEN_OFF = ESC // "[?1049l"   ! Disable alt screen buffer
     character(len=*), parameter :: BOLD = ESC // "[1m"
     character(len=*), parameter :: DIM = ESC // "[2m"
     character(len=*), parameter :: REVERSE = ESC // "[7m"
@@ -88,6 +90,8 @@ contains
     end subroutine get_term_size
 
     subroutine setup_raw_mode()
+        ! Enable alternative screen buffer (prevents scrollback pollution and flashing)
+        write(output_unit, '(a)', advance='no') ALT_SCREEN_ON
         ! Blocking mode for stable operation
         call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
     end subroutine setup_raw_mode
@@ -101,6 +105,8 @@ contains
     end subroutine disable_read_timeout
 
     subroutine restore_terminal()
+        ! Disable alternative screen buffer (restore normal screen)
+        write(output_unit, '(a)', advance='no') ALT_SCREEN_OFF
         call execute_command_line("stty icanon echo 2>/dev/null")
     end subroutine restore_terminal
 
