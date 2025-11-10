@@ -59,6 +59,11 @@ program fortress
     integer :: favorite_count = 0
     logical, dimension(MAX_FILES) :: current_is_favorite, parent_is_favorite
 
+    ! Rename mode state
+    logical :: in_rename_mode = .false.
+    character(len=MAX_PATH) :: rename_buffer = ''
+    integer :: rename_cursor_pos = 0
+
     character(len=1) :: key
     integer :: i, rows, cols, visible_height
     logical :: is_shift_pressed, is_alt_pressed
@@ -175,12 +180,95 @@ program fortress
                            has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
                            is_selected, selection_count, &
                            current_is_favorite, parent_is_favorite, &
-                           search_buffer, search_length)
+                           search_buffer, search_length, &
+                           in_rename_mode, rename_buffer, rename_cursor_pos)
 
         ! Get input (with error handling for End-of-record after Enter key)
         read(*, '(a1)', advance='no', iostat=i) key
-        ! Only cycle on End-of-record (negative iostat), which happens after pressing Enter
-        ! Don't skip on positive errors or when we successfully read a character
+
+        ! Rename mode key handling - intercept ALL keys when in rename mode (BEFORE error handling)
+        if (in_rename_mode) then
+            ! In rename mode, handle read errors differently
+            if (i < 0) then
+                ! End-of-record in rename mode - treat as Enter
+                key = achar(13)
+            else if (i > 0) then
+                ! Read error - ignore and continue
+                cycle
+            end if
+
+            ! Handle ESC to cancel rename
+            if (ichar(key) == 27) then
+                in_rename_mode = .false.
+                rename_buffer = ''
+                rename_cursor_pos = 0
+                cycle
+            ! Handle Enter to confirm rename
+            else if (ichar(key) == 10 .or. ichar(key) == 13) then
+                ! Execute rename if name changed
+                if (len_trim(rename_buffer) > 0 .and. trim(rename_buffer) /= trim(current_files(selected))) then
+                    block
+                        character(len=MAX_PATH) :: old_path, new_path, old_name
+                        character(len=MAX_PATH*2) :: mv_cmd
+                        integer :: stat
+
+                        ! Store the old name for cursor tracking
+                        old_name = current_files(selected)
+                        old_path = join_path(current_dir, old_name)
+                        new_path = join_path(current_dir, trim(rename_buffer))
+
+                        ! Use -f flag for case-only renames, double quotes for paths
+                        mv_cmd = 'mv -f "' // trim(old_path) // '" "' // trim(new_path) // '"'
+                        call execute_command_line(trim(mv_cmd), exitstat=stat, wait=.true.)
+
+                        ! After rename succeeds, find the renamed file in the refreshed list
+                        if (stat == 0) then
+                            temp_dir = new_path
+                            selected = -2  ! Signal to find this file in the next iteration
+                        end if
+                    end block
+                end if
+                in_rename_mode = .false.
+                rename_buffer = ''
+                rename_cursor_pos = 0
+                cycle
+            ! Handle Backspace
+            else if (ichar(key) == 127 .or. ichar(key) == 8) then
+                if (rename_cursor_pos > 0) then
+                    if (rename_cursor_pos == len_trim(rename_buffer)) then
+                        ! Cursor at end - simple delete
+                        rename_buffer = rename_buffer(1:len_trim(rename_buffer)-1)
+                    else
+                        ! Cursor in middle - delete and shift left
+                        rename_buffer = rename_buffer(1:rename_cursor_pos-1) // &
+                                       rename_buffer(rename_cursor_pos+1:len_trim(rename_buffer))
+                    end if
+                    rename_cursor_pos = rename_cursor_pos - 1
+                end if
+                cycle
+            ! Handle printable characters - insert at cursor position
+            else if ((ichar(key) >= ichar('a') .and. ichar(key) <= ichar('z')) .or. &
+                     (ichar(key) >= ichar('A') .and. ichar(key) <= ichar('Z')) .or. &
+                     (ichar(key) >= ichar('0') .and. ichar(key) <= ichar('9')) .or. &
+                     key == '_' .or. key == '-' .or. key == '.' .or. key == ' ') then
+                if (len_trim(rename_buffer) < MAX_PATH - 1) then
+                    if (rename_cursor_pos == len_trim(rename_buffer)) then
+                        ! Cursor at end - simple append
+                        rename_buffer = trim(rename_buffer) // key
+                    else
+                        ! Cursor in middle - insert and shift right
+                        rename_buffer = rename_buffer(1:rename_cursor_pos) // key // &
+                                       rename_buffer(rename_cursor_pos+1:len_trim(rename_buffer))
+                    end if
+                    rename_cursor_pos = rename_cursor_pos + 1
+                end if
+                cycle
+            end if
+            ! Ignore all other keys in rename mode
+            cycle
+        end if
+
+        ! Handle read errors for normal mode
         if (i < 0) cycle  ! End-of-record - skip and try again
         if (i > 0) cycle  ! Other read errors - skip and try again
 
@@ -236,8 +324,138 @@ program fortress
 
             call read_key_with_modifiers(key, is_shift_pressed, is_alt_pressed)
 
-            ! Handle Alt+key combinations - skip arrow processing and handle below
-            if (.not. is_alt_pressed) then
+            ! Handle Alt+key combinations
+            if (is_alt_pressed) then
+                ! Process Alt keys here (key is now encoded as achar(1-26))
+                select case(ichar(key))
+                case(7)  ! Alt+g - toggle git mode
+                    if (in_git_repo) then
+                        if (mode == 'normal') then
+                            mode = 'git'
+                        else
+                            mode = 'normal'
+                        end if
+                    end if
+                case(14)  ! Alt+n - enter rename mode
+                    if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                        in_rename_mode = .true.
+                        rename_buffer = current_files(selected)
+                        rename_cursor_pos = len_trim(rename_buffer)
+                    end if
+                case(22)  ! Alt+v - view file
+                    if (.not. current_is_dir(selected)) then
+                        if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                            call open_file_in_default_app(join_path(current_dir, current_files(selected)))
+                        end if
+                    end if
+                case(19)  ! Alt+s - fzf search
+                    call fzf_search(current_dir, temp_dir)
+                    if (len_trim(temp_dir) > 0) then
+                        parent_dir = get_parent_path(temp_dir)
+                        current_dir = parent_dir
+                        parent_dir = get_parent_path(current_dir)
+                        selected = -2
+                        call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+                    end if
+                case(3)  ! Alt+c - cd on exit
+                    if (current_is_dir(selected)) then
+                        if (trim(current_files(selected)) == "..") then
+                            exit_dir = parent_dir
+                        else if (trim(current_files(selected)) == ".") then
+                            exit_dir = current_dir
+                        else
+                            exit_dir = join_path(current_dir, current_files(selected))
+                        end if
+                        cd_on_exit = .true.
+                        running = .false.
+                    end if
+                case(18)  ! Alt+r - delete
+                    if (selection_count > 0) then
+                        call delete_multi_with_confirmation(current_dir, current_files, current_is_dir, &
+                                                           is_selected, selection_count, current_count)
+                        call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                    else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                        call delete_with_confirmation(current_dir, current_files(selected), current_is_dir(selected))
+                    end if
+                case(13)  ! Alt+m - move mode
+                    if (move_mode) then
+                        call execute_move_file(move_source_path, current_dir, current_files(move_dest_selected), &
+                                              current_is_dir(move_dest_selected))
+                        move_mode = .false.
+                    else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                        move_source_path = join_path(current_dir, current_files(selected))
+                        move_source_name = current_files(selected)
+                        move_mode = .true.
+                        move_dest_selected = find_first_directory(current_files, current_is_dir, current_count)
+                    end if
+                case(25)  ! Alt+y - copy
+                    if (selection_count > 0) then
+                        clipboard_count = 0
+                        do i = 1, current_count
+                            if (is_selected(i) .and. trim(current_files(i)) /= "." .and. &
+                                trim(current_files(i)) /= "..") then
+                                clipboard_count = clipboard_count + 1
+                                clipboard_paths(clipboard_count) = join_path(current_dir, current_files(i))
+                                clipboard_names(clipboard_count) = current_files(i)
+                            end if
+                        end do
+                        clipboard_is_cut = .false.
+                        has_clipboard = .true.
+                        call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                    else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                        clipboard_count = 1
+                        clipboard_paths(1) = join_path(current_dir, current_files(selected))
+                        clipboard_names(1) = current_files(selected)
+                        clipboard_source_path = clipboard_paths(1)
+                        clipboard_source_name = clipboard_names(1)
+                        clipboard_is_cut = .false.
+                        has_clipboard = .true.
+                    end if
+                case(24)  ! Alt+x - cut
+                    if (selection_count > 0) then
+                        clipboard_count = 0
+                        do i = 1, current_count
+                            if (is_selected(i) .and. trim(current_files(i)) /= "." .and. &
+                                trim(current_files(i)) /= "..") then
+                                clipboard_count = clipboard_count + 1
+                                clipboard_paths(clipboard_count) = join_path(current_dir, current_files(i))
+                                clipboard_names(clipboard_count) = current_files(i)
+                            end if
+                        end do
+                        clipboard_is_cut = .true.
+                        has_clipboard = .true.
+                        call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                    else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                        clipboard_count = 1
+                        clipboard_paths(1) = join_path(current_dir, current_files(selected))
+                        clipboard_names(1) = current_files(selected)
+                        clipboard_source_path = clipboard_paths(1)
+                        clipboard_source_name = clipboard_names(1)
+                        clipboard_is_cut = .true.
+                        has_clipboard = .true.
+                    end if
+                case(16)  ! Alt+p - paste
+                    if (has_clipboard) then
+                        if (clipboard_count > 1) then
+                            call execute_multi_paste(clipboard_paths, clipboard_names, clipboard_count, &
+                                                    clipboard_is_cut, current_dir, current_files(selected), &
+                                                    current_is_dir(selected))
+                        else
+                            call execute_paste(clipboard_paths(1), clipboard_is_cut, current_dir, &
+                                              current_files(selected), current_is_dir(selected))
+                        end if
+                        if (clipboard_is_cut) then
+                            has_clipboard = .false.
+                            clipboard_count = 0
+                        end if
+                    end if
+                end select
+                ! Alt key processed, skip rest of case(27)
+                cycle
+            end if
+
+            ! Handle arrow keys (only if not Alt key)
+            if (.true.) then
                 ! Process arrow keys normally
                 if (move_mode) then
                 ! In move mode, navigate directories only
@@ -346,9 +564,12 @@ program fortress
                     mode = 'normal'
                 end if
             end if
-        case(14)  ! Alt+n - rename file/directory
+        case(14)  ! Alt+n - enter rename mode
             if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
-                call rename_file_prompt(current_dir, current_files(selected))
+                ! Enter rename mode - pre-fill with current filename
+                in_rename_mode = .true.
+                rename_buffer = current_files(selected)
+                rename_cursor_pos = len_trim(rename_buffer)
             end if
         case(22)  ! Alt+v - view file (always available)
             if (.not. current_is_dir(selected)) then

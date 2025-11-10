@@ -13,7 +13,7 @@ module terminal_control
 
     ! ANSI escape codes
     character(len=*), parameter :: ESC = char(27)
-    character(len=*), parameter :: CLEAR = ESC // "[H" // ESC // "[J"  ! Move to home, clear to end
+    character(len=*), parameter :: CLEAR = ESC // "[1;1H" // ESC // "[2J"  ! Explicit position (1,1) + full clear
     character(len=*), parameter :: ALT_SCREEN_ON = ESC // "[?1049h"    ! Enable alt screen buffer
     character(len=*), parameter :: ALT_SCREEN_OFF = ESC // "[?1049l"   ! Disable alt screen buffer
     character(len=*), parameter :: BOLD = ESC // "[1m"
@@ -92,6 +92,9 @@ contains
     subroutine setup_raw_mode()
         ! Enable alternative screen buffer (prevents scrollback pollution and flashing)
         write(output_unit, '(a)', advance='no') ALT_SCREEN_ON
+        ! Immediately clear and position cursor to (1,1) for consistency across terminals
+        write(output_unit, '(a)', advance='no') ESC // "[2J" // ESC // "[1;1H"
+        call flush(output_unit)
         ! Blocking mode for stable operation
         call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
     end subroutine setup_raw_mode
