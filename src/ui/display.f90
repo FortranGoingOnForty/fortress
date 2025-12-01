@@ -40,6 +40,8 @@ contains
         integer :: left_w, i, parent_idx, current_idx, vis_h, display_len
         character(len=256) :: fname
         character(len=20) :: color_code
+        character(len=600) :: footer_text
+        integer :: footer_len
 
         left_w = c * 3 / 10
         vis_h = r - top_padding - 4  ! Visible height with buffer to prevent scrolling
@@ -227,17 +229,27 @@ contains
         end do
 
         ! Footer - help text only (status moved to header)
+        ! Build footer text and truncate to prevent wrapping which causes screen scroll
         if (move_mode) then
-            write(output_unit, '(a)') DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root v:move here q:cancel" // RESET
+            footer_text = DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root v:move here q:cancel" // RESET
         else if (selection_count > 0) then
-            ! Selection mode footer - show multi-select help
-            write(output_unit, '(a)') DIM // "Ctrl-D:deselect Space:toggle Shift+↑↓:block y:copy x:cut p:paste r:delete | " // RESET // &
-                                     DIM // "→:enter ←:back ~:home /:root c:cd q:quit" // RESET
+            footer_text = DIM // "Ctrl-D:deselect Space:toggle Shift+↑↓:block y:copy x:cut p:paste r:delete | " // RESET // &
+                         DIM // "→:enter ←:back ~:home /:root c:cd q:quit" // RESET
         else if (in_git_repo) then
-            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
+            footer_text = DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
         else
-            write(output_unit, '(a)') DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
+            footer_text = DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
         end if
+
+        ! Truncate footer to terminal width - CRITICAL to prevent wrapping which causes screen scroll
+        ! Conservative truncation: assume ANSI codes are ~30% of string, so truncate to ~130% of terminal width
+        footer_len = len_trim(footer_text)
+        if (footer_len > (c * 13 / 10)) then
+            footer_text = footer_text(1:c * 13 / 10)
+        end if
+
+        ! Write footer WITHOUT newline (newline on last row causes wrap which scrolls screen up)
+        write(output_unit, '(a)', advance='no') trim(footer_text)
 
     contains
         function itoa(n) result(str)
