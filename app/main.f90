@@ -21,6 +21,15 @@ program fortress
     logical :: in_git_repo = .false., running = .true., cd_on_exit = .false.
     logical :: show_dotfiles = .true.
 
+    ! Mode state (normal or git)
+    character(len=10) :: mode = 'normal'
+
+    ! Fuzzy search state
+    character(len=32) :: search_buffer = ''
+    integer :: search_length = 0
+    integer(8) :: last_search_tick = 0
+    integer(8) :: clock_rate, current_tick
+
     ! Move mode state
     logical :: move_mode = .false.
     character(len=MAX_PATH) :: move_source_path
@@ -50,9 +59,14 @@ program fortress
     integer :: favorite_count = 0
     logical, dimension(MAX_FILES) :: current_is_favorite, parent_is_favorite
 
+    ! Rename mode state
+    logical :: in_rename_mode = .false.
+    character(len=MAX_PATH) :: rename_buffer = ''
+    integer :: rename_cursor_pos = 0
+
     character(len=1) :: key
     integer :: i, rows, cols, visible_height, top_padding
-    logical :: is_shift_pressed
+    logical :: is_shift_pressed, is_alt_pressed
     character(len=256) :: term_program
 
     ! Initialize
@@ -60,6 +74,7 @@ program fortress
     parent_dir = get_parent_path(current_dir)
     call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
     call load_favorites(favorite_dirs, favorite_count)
+    call system_clock(count_rate=clock_rate)
 
     ! Detect terminal type once for consistent padding throughout
     call get_environment_variable("TERM_PROGRAM", term_program)
@@ -188,39 +203,289 @@ program fortress
                            current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
                            current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                            selected, parent_selected, scroll_offset, parent_scroll_offset, &
-                           in_git_repo, repo_name, branch_name, &
+                           in_git_repo, repo_name, branch_name, mode, &
                            move_mode, move_source_name, move_dest_selected, &
                            has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
                            is_selected, selection_count, &
-                           current_is_favorite, parent_is_favorite)
+                           current_is_favorite, parent_is_favorite, &
+                           search_buffer, search_length, &
+                           in_rename_mode, rename_buffer, rename_cursor_pos)
 
         ! Get input (with error handling for End-of-record after Enter key)
         read(*, '(a1)', advance='no', iostat=i) key
-        ! Only cycle on End-of-record (negative iostat), which happens after pressing Enter
-        ! Don't skip on positive errors or when we successfully read a character
+
+        ! Rename mode key handling - intercept ALL keys when in rename mode (BEFORE error handling)
+        if (in_rename_mode) then
+            ! In rename mode, handle read errors differently
+            if (i < 0) then
+                ! End-of-record in rename mode - treat as Enter
+                key = achar(13)
+            else if (i > 0) then
+                ! Read error - ignore and continue
+                cycle
+            end if
+
+            ! Handle ESC to cancel rename
+            if (ichar(key) == 27) then
+                in_rename_mode = .false.
+                rename_buffer = ''
+                rename_cursor_pos = 0
+                cycle
+            ! Handle Enter to confirm rename
+            else if (ichar(key) == 10 .or. ichar(key) == 13) then
+                ! Execute rename if name changed
+                if (len_trim(rename_buffer) > 0 .and. trim(rename_buffer) /= trim(current_files(selected))) then
+                    block
+                        character(len=MAX_PATH) :: old_path, new_path, old_name
+                        character(len=MAX_PATH*2) :: mv_cmd
+                        integer :: stat
+
+                        ! Store the old name for cursor tracking
+                        old_name = current_files(selected)
+                        old_path = join_path(current_dir, old_name)
+                        new_path = join_path(current_dir, trim(rename_buffer))
+
+                        ! Use -f flag for case-only renames, double quotes for paths
+                        mv_cmd = 'mv -f "' // trim(old_path) // '" "' // trim(new_path) // '"'
+                        call execute_command_line(trim(mv_cmd), exitstat=stat, wait=.true.)
+
+                        ! After rename succeeds, find the renamed file in the refreshed list
+                        if (stat == 0) then
+                            temp_dir = new_path
+                            selected = -2  ! Signal to find this file in the next iteration
+                        end if
+                    end block
+                end if
+                in_rename_mode = .false.
+                rename_buffer = ''
+                rename_cursor_pos = 0
+                cycle
+            ! Handle Backspace
+            else if (ichar(key) == 127 .or. ichar(key) == 8) then
+                if (rename_cursor_pos > 0) then
+                    if (rename_cursor_pos == len_trim(rename_buffer)) then
+                        ! Cursor at end - simple delete
+                        rename_buffer = rename_buffer(1:len_trim(rename_buffer)-1)
+                    else
+                        ! Cursor in middle - delete and shift left
+                        rename_buffer = rename_buffer(1:rename_cursor_pos-1) // &
+                                       rename_buffer(rename_cursor_pos+1:len_trim(rename_buffer))
+                    end if
+                    rename_cursor_pos = rename_cursor_pos - 1
+                end if
+                cycle
+            ! Handle printable characters - insert at cursor position
+            else if ((ichar(key) >= ichar('a') .and. ichar(key) <= ichar('z')) .or. &
+                     (ichar(key) >= ichar('A') .and. ichar(key) <= ichar('Z')) .or. &
+                     (ichar(key) >= ichar('0') .and. ichar(key) <= ichar('9')) .or. &
+                     key == '_' .or. key == '-' .or. key == '.' .or. key == ' ') then
+                if (len_trim(rename_buffer) < MAX_PATH - 1) then
+                    if (rename_cursor_pos == len_trim(rename_buffer)) then
+                        ! Cursor at end - simple append
+                        rename_buffer = trim(rename_buffer) // key
+                    else
+                        ! Cursor in middle - insert and shift right
+                        rename_buffer = rename_buffer(1:rename_cursor_pos) // key // &
+                                       rename_buffer(rename_cursor_pos+1:len_trim(rename_buffer))
+                    end if
+                    rename_cursor_pos = rename_cursor_pos + 1
+                end if
+                cycle
+            end if
+            ! Ignore all other keys in rename mode
+            cycle
+        end if
+
+        ! Handle read errors for normal mode
         if (i < 0) cycle  ! End-of-record - skip and try again
         if (i > 0) cycle  ! Other read errors - skip and try again
 
+        ! Fuzzy search: handle printable characters (only in normal mode, no special modes active)
+        if (trim(mode) == 'normal' .and. .not. move_mode .and. selection_count == 0) then
+            ! Check if character is printable (letters, digits, dash, underscore, dot)
+            if ((ichar(key) >= ichar('a') .and. ichar(key) <= ichar('z')) .or. &
+                (ichar(key) >= ichar('A') .and. ichar(key) <= ichar('Z')) .or. &
+                (ichar(key) >= ichar('0') .and. ichar(key) <= ichar('9')) .or. &
+                key == '-' .or. key == '_' .or. key == '.') then
+
+                ! Check timeout (0.5 seconds = clock_rate / 2)
+                if (search_length > 0) then
+                    call system_clock(current_tick)
+                    if (current_tick - last_search_tick > clock_rate / 2) then
+                        ! Timeout - clear buffer and start fresh
+                        search_length = 0
+                        search_buffer = ''
+                    end if
+                end if
+
+                ! Add to buffer
+                if (search_length < 32) then
+                    search_length = search_length + 1
+                    search_buffer(search_length:search_length) = key
+                    call system_clock(last_search_tick)
+
+                    ! Perform fuzzy jump
+                    call fuzzy_jump(current_files, current_count, search_buffer(1:search_length), selected)
+                end if
+                cycle  ! Skip normal key processing
+            else if (ichar(key) == 127 .or. ichar(key) == 8) then
+                ! Backspace - remove last character from search
+                if (search_length > 0) then
+                    search_length = search_length - 1
+                    call system_clock(last_search_tick)
+                    if (search_length > 0) then
+                        call fuzzy_jump(current_files, current_count, search_buffer(1:search_length), selected)
+                    end if
+                end if
+                cycle
+            end if
+        end if
+
         ! Handle input
         select case(ichar(key))
-        case(27)  ! ESC - could be arrow keys, Shift+arrow, or standalone ESC to clear selections
-            ! Read the arrow key sequence first to determine what was pressed
-            call read_arrow_key_with_shift(key, is_shift_pressed)
-
-            ! If it's not an arrow key (A/B/C/D), it was a standalone ESC press
-            if (key /= 'A' .and. key /= 'B' .and. key /= 'C' .and. key /= 'D') then
-                ! Standalone ESC - exit multi-select mode if active
-                if (selection_count > 0) then
-                    call clear_all_selections(is_selected, selection_count, in_selection_mode)
-                    selection_anchor = -1
-                    has_disjoint_selection = .false.
-                end if
-                cycle  ! Redraw and wait for next input
+        case(27)  ! ESC - arrow keys, Shift+arrow keys, or Alt+key
+            ! Clear search buffer if active (but still process the arrow key)
+            if (search_length > 0) then
+                search_length = 0
+                search_buffer = ''
             end if
 
-            ! If we get here, it's an arrow key - continue with normal arrow handling
+            call read_key_with_modifiers(key, is_shift_pressed, is_alt_pressed)
 
-            if (move_mode) then
+            ! Handle Alt+key combinations
+            if (is_alt_pressed) then
+                ! Process Alt keys here (key is now encoded as achar(1-26))
+                select case(ichar(key))
+                case(7)  ! Alt+g - toggle git mode
+                    if (in_git_repo) then
+                        if (mode == 'normal') then
+                            mode = 'git'
+                        else
+                            mode = 'normal'
+                        end if
+                    end if
+                case(14)  ! Alt+n - enter rename mode
+                    if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                        in_rename_mode = .true.
+                        rename_buffer = current_files(selected)
+                        rename_cursor_pos = len_trim(rename_buffer)
+                    end if
+                case(22)  ! Alt+v - view file
+                    if (.not. current_is_dir(selected)) then
+                        if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                            call open_file_in_default_app(join_path(current_dir, current_files(selected)))
+                        end if
+                    end if
+                case(19)  ! Alt+s - fzf search
+                    call fzf_search(current_dir, temp_dir)
+                    if (len_trim(temp_dir) > 0) then
+                        parent_dir = get_parent_path(temp_dir)
+                        current_dir = parent_dir
+                        parent_dir = get_parent_path(current_dir)
+                        selected = -2
+                        call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
+                    end if
+                case(3)  ! Alt+c - cd on exit
+                    if (current_is_dir(selected)) then
+                        if (trim(current_files(selected)) == "..") then
+                            exit_dir = parent_dir
+                        else if (trim(current_files(selected)) == ".") then
+                            exit_dir = current_dir
+                        else
+                            exit_dir = join_path(current_dir, current_files(selected))
+                        end if
+                        cd_on_exit = .true.
+                        running = .false.
+                    end if
+                case(18)  ! Alt+r - delete
+                    if (selection_count > 0) then
+                        call delete_multi_with_confirmation(current_dir, current_files, current_is_dir, &
+                                                           is_selected, selection_count, current_count)
+                        call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                    else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                        call delete_with_confirmation(current_dir, current_files(selected), current_is_dir(selected))
+                    end if
+                case(13)  ! Alt+m - move mode
+                    if (move_mode) then
+                        call execute_move_file(move_source_path, current_dir, current_files(move_dest_selected), &
+                                              current_is_dir(move_dest_selected))
+                        move_mode = .false.
+                    else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                        move_source_path = join_path(current_dir, current_files(selected))
+                        move_source_name = current_files(selected)
+                        move_mode = .true.
+                        move_dest_selected = find_first_directory(current_files, current_is_dir, current_count)
+                    end if
+                case(25)  ! Alt+y - copy
+                    if (selection_count > 0) then
+                        clipboard_count = 0
+                        do i = 1, current_count
+                            if (is_selected(i) .and. trim(current_files(i)) /= "." .and. &
+                                trim(current_files(i)) /= "..") then
+                                clipboard_count = clipboard_count + 1
+                                clipboard_paths(clipboard_count) = join_path(current_dir, current_files(i))
+                                clipboard_names(clipboard_count) = current_files(i)
+                            end if
+                        end do
+                        clipboard_is_cut = .false.
+                        has_clipboard = .true.
+                        call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                    else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                        clipboard_count = 1
+                        clipboard_paths(1) = join_path(current_dir, current_files(selected))
+                        clipboard_names(1) = current_files(selected)
+                        clipboard_source_path = clipboard_paths(1)
+                        clipboard_source_name = clipboard_names(1)
+                        clipboard_is_cut = .false.
+                        has_clipboard = .true.
+                    end if
+                case(24)  ! Alt+x - cut
+                    if (selection_count > 0) then
+                        clipboard_count = 0
+                        do i = 1, current_count
+                            if (is_selected(i) .and. trim(current_files(i)) /= "." .and. &
+                                trim(current_files(i)) /= "..") then
+                                clipboard_count = clipboard_count + 1
+                                clipboard_paths(clipboard_count) = join_path(current_dir, current_files(i))
+                                clipboard_names(clipboard_count) = current_files(i)
+                            end if
+                        end do
+                        clipboard_is_cut = .true.
+                        has_clipboard = .true.
+                        call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                    else if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                        clipboard_count = 1
+                        clipboard_paths(1) = join_path(current_dir, current_files(selected))
+                        clipboard_names(1) = current_files(selected)
+                        clipboard_source_path = clipboard_paths(1)
+                        clipboard_source_name = clipboard_names(1)
+                        clipboard_is_cut = .true.
+                        has_clipboard = .true.
+                    end if
+                case(16)  ! Alt+p - paste
+                    if (has_clipboard) then
+                        if (clipboard_count > 1) then
+                            call execute_multi_paste(clipboard_paths, clipboard_names, clipboard_count, &
+                                                    clipboard_is_cut, current_dir, current_files(selected), &
+                                                    current_is_dir(selected))
+                        else
+                            call execute_paste(clipboard_paths(1), clipboard_is_cut, current_dir, &
+                                              current_files(selected), current_is_dir(selected))
+                        end if
+                        if (clipboard_is_cut) then
+                            has_clipboard = .false.
+                            clipboard_count = 0
+                        end if
+                    end if
+                end select
+                ! Alt key processed, skip rest of case(27)
+                cycle
+            end if
+
+            ! Handle arrow keys (only if not Alt key)
+            if (.true.) then
+                ! Process arrow keys normally
+                if (move_mode) then
                 ! In move mode, navigate directories only
                 select case(key)
                 case('A')  ! Up - jump to previous directory
@@ -318,13 +583,35 @@ program fortress
                     end if
                 end select
             end if
-        case(113, 81)  ! 'q' or 'Q' - exit move mode or quit
+            end if  ! End of .not. is_alt_pressed check
+        case(7)  ! Alt+g - toggle git mode
+            if (in_git_repo) then
+                if (mode == 'normal') then
+                    mode = 'git'
+                else
+                    mode = 'normal'
+                end if
+            end if
+        case(14)  ! Alt+n - enter rename mode
+            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                ! Enter rename mode - pre-fill with current filename
+                in_rename_mode = .true.
+                rename_buffer = current_files(selected)
+                rename_cursor_pos = len_trim(rename_buffer)
+            end if
+        case(22)  ! Alt+v - view file (always available)
+            if (.not. current_is_dir(selected)) then
+                if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
+                    call open_file_in_default_app(join_path(current_dir, current_files(selected)))
+                end if
+            end if
+        case(113, 81)  ! 'q' or 'Q' - exit move mode
             if (move_mode) then
                 move_mode = .false.
-            else
-                running = .false.
             end if
-        case(99, 67)  ! 'c' or 'C' - cd to directory on exit
+        case(17)  ! Ctrl-q - quit program
+            running = .false.
+        case(3)  ! Alt+c - cd to directory on exit
             if (current_is_dir(selected)) then
                 if (trim(current_files(selected)) == "..") then
                     exit_dir = parent_dir
@@ -336,7 +623,7 @@ program fortress
                 cd_on_exit = .true.
                 running = .false.
             end if
-        case(83, 115)  ! 'S' or 's' - fzf search (moved from 'f')
+        case(19)  ! Alt+s - fzf search
             call fzf_search(current_dir, temp_dir)
             if (len_trim(temp_dir) > 0) then
                 parent_dir = get_parent_path(temp_dir)
@@ -346,13 +633,13 @@ program fortress
                 call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
             end if
         case(65, 97)  ! 'A' or 'a' - git add (batch stage directories)
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                     call git_add_file(current_dir, current_files(selected))
                 end if
             end if
         case(85, 117)  ! 'U' or 'u' - git unstage (batch unstage directories)
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                     if (current_is_staged(selected)) then
                         call git_unstage_file(current_dir, current_files(selected))
@@ -360,37 +647,27 @@ program fortress
                 end if
             end if
         case(77, 109)  ! 'M' or 'm' - git commit
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 call git_commit_prompt(current_dir, repo_name)
             end if
         case(72, 104)  ! 'H' or 'h' - git push (h for "push to remote Host")
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 call git_push_prompt(current_dir, repo_name)
             end if
         case(84, 116)  ! 'T' or 't' - git tag
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 call git_tag_prompt(current_dir, repo_name)
             end if
         case(70, 102)  ! 'F' or 'f' - git fetch
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 call git_fetch_prompt(current_dir, repo_name)
             end if
         case(76, 108)  ! 'L' or 'l' - git pull
-            if (in_git_repo) then
+            if (in_git_repo .and. trim(mode) == 'git') then
                 call git_pull_prompt(current_dir, repo_name)
             end if
-        case(79, 111)  ! 'O' or 'o' - open file
-            if (.not. current_is_dir(selected)) then
-                if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
-                    call open_file_in_default_app(join_path(current_dir, current_files(selected)))
-                end if
-            end if
-        case(78, 110)  ! 'N' or 'n' - rename file/directory
-            if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
-                call rename_file_prompt(current_dir, current_files(selected))
-            end if
         case(68, 100)  ! 'D' or 'd' - show git diff
-            if (in_git_repo .and. .not. current_is_dir(selected)) then
+            if (in_git_repo .and. trim(mode) == 'git' .and. .not. current_is_dir(selected)) then
                 if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                     if (current_is_staged(selected) .or. current_is_unstaged(selected)) then
                         call show_git_diff_fullscreen(current_dir, current_files(selected), &
@@ -398,7 +675,7 @@ program fortress
                     end if
                 end if
             end if
-        case(82, 114)  ! 'R' or 'r' - delete/remove with confirmation
+        case(18)  ! Alt+r - delete/remove with confirmation
             if (selection_count > 0) then
                 ! Delete multiple selections
                 call delete_multi_with_confirmation(current_dir, current_files, current_is_dir, &
@@ -468,12 +745,6 @@ program fortress
                 call clear_all_selections(is_selected, selection_count, in_selection_mode)
                 call detect_git_repo(current_dir, in_git_repo, repo_name, branch_name)
             end if
-        case(4)  ! Ctrl-D - clear multi-select (deselect all)
-            if (selection_count > 0) then
-                call clear_all_selections(is_selected, selection_count, in_selection_mode)
-                selection_anchor = -1
-                has_disjoint_selection = .false.
-            end if
         case(32)  ! Space - toggle selection on current item
             if (trim(current_files(selected)) /= "." .and. trim(current_files(selected)) /= "..") then
                 if (is_selected(selected)) then
@@ -489,7 +760,7 @@ program fortress
                 ! Check if we have disjoint selections
                 call check_disjoint_selection(is_selected, current_count, has_disjoint_selection)
             end if
-        case(86, 118)  ! 'V' or 'v' - enter move mode OR confirm move
+        case(13)  ! Alt+m - enter move mode OR confirm move
             if (move_mode) then
                 ! Confirm move - execute the move to the white-highlighted directory
                 call execute_move_file(move_source_path, current_dir, current_files(move_dest_selected), &
@@ -503,7 +774,12 @@ program fortress
                 ! Find first directory for destination cursor
                 move_dest_selected = find_first_directory(current_files, current_is_dir, current_count)
             end if
-        case(89, 121)  ! 'Y' or 'y' - yank/copy to clipboard
+        case(69, 101)  ! 'E' or 'e' - exit/clear multi-select mode
+            if (selection_count > 0) then
+                call clear_all_selections(is_selected, selection_count, in_selection_mode)
+                selection_anchor = -1
+            end if
+        case(25)  ! Alt+y - yank/copy to clipboard
             if (selection_count > 0) then
                 ! Copy multiple selections
                 clipboard_count = 0
@@ -529,7 +805,7 @@ program fortress
                 clipboard_is_cut = .false.
                 has_clipboard = .true.
             end if
-        case(88, 120)  ! 'X' or 'x' - cut to clipboard
+        case(24)  ! Alt+x - cut to clipboard
             if (selection_count > 0) then
                 ! Cut multiple selections
                 clipboard_count = 0
@@ -555,7 +831,7 @@ program fortress
                 clipboard_is_cut = .true.
                 has_clipboard = .true.
             end if
-        case(80, 112)  ! 'P' or 'p' - paste from clipboard
+        case(16)  ! Alt+p - paste from clipboard
             if (has_clipboard) then
                 if (clipboard_count > 1) then
                     ! Paste multiple items
@@ -1355,7 +1631,7 @@ contains
         call execute_command_line("rm -f ~/.fortress_fav_temp ~/.fortress_fav_select 2>/dev/null")
 
         ! Re-enable raw mode
-        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
+        call setup_raw_mode()
     end subroutine add_favorite_with_replacement
 
     subroutine mark_favorites_in_lists(current_dir, files, count, is_dir, favs, fav_count, is_fav)
@@ -1439,7 +1715,142 @@ contains
         call execute_command_line("rm -f ~/.fortress_fav_picker ~/.fortress_fav_selected 2>/dev/null")
 
         ! Re-enable raw mode
-        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null", wait=.true.)
+        call setup_raw_mode()
     end subroutine open_favorites_picker
+
+    subroutine fuzzy_jump(files, count, pattern, selected)
+        character(len=*), dimension(*), intent(in) :: files
+        integer, intent(in) :: count
+        character(len=*), intent(in) :: pattern
+        integer, intent(inout) :: selected
+        integer :: i, score, best_score, best_idx
+        character(len=256) :: pattern_lower, filename_lower
+
+        if (len_trim(pattern) == 0) return
+
+        best_score = -1
+        best_idx = selected
+
+        ! Convert pattern to lowercase
+        pattern_lower = pattern
+        call to_lowercase(pattern_lower)
+
+        ! Search for best match
+        do i = 1, count
+            ! Skip "." and ".."
+            if (trim(files(i)) == "." .or. trim(files(i)) == "..") cycle
+
+            ! Convert filename to lowercase
+            filename_lower = files(i)
+            call to_lowercase(filename_lower)
+
+            ! Get fuzzy match score
+            score = fuzzy_score(pattern_lower, filename_lower)
+
+            if (score > best_score) then
+                best_score = score
+                best_idx = i
+            end if
+        end do
+
+        ! Jump to best match if we found something
+        if (best_score >= 0) then
+            selected = best_idx
+        end if
+    end subroutine fuzzy_jump
+
+    function fuzzy_score(pattern, text) result(score)
+        character(len=*), intent(in) :: pattern, text
+        integer :: score
+        integer :: i, j, pat_len, text_len, consecutive
+        logical :: match_found
+        character(len=256) :: pattern_trim, text_trim
+
+        pattern_trim = trim(pattern)
+        text_trim = trim(text)
+        pat_len = len_trim(pattern_trim)
+        text_len = len_trim(text_trim)
+
+        if (pat_len == 0) then
+            score = 0
+            return
+        end if
+
+        ! Exact match (highest priority)
+        if (pattern_trim == text_trim) then
+            score = 10000
+            return
+        end if
+
+        ! Prefix match (very high priority)
+        if (text_len >= pat_len) then
+            if (text_trim(1:pat_len) == pattern_trim) then
+                score = 5000
+                return
+            end if
+        end if
+
+        ! Fuzzy match with scoring
+        score = 0
+        consecutive = 0
+        j = 1
+
+        do i = 1, pat_len
+            match_found = .false.
+            do while (j <= text_len)
+                if (pattern_trim(i:i) == text_trim(j:j)) then
+                    ! Base score for character match
+                    score = score + 100
+
+                    ! Bonus for consecutive characters
+                    if (consecutive > 0) then
+                        score = score + 50
+                    end if
+                    consecutive = consecutive + 1
+
+                    ! Bonus for match at start
+                    if (j == i) then
+                        score = score + 200
+                    end if
+
+                    ! Bonus for word boundary (after /, -, _, .)
+                    if (j > 1) then
+                        if (text_trim(j-1:j-1) == '/' .or. text_trim(j-1:j-1) == '-' .or. &
+                            text_trim(j-1:j-1) == '_' .or. text_trim(j-1:j-1) == '.') then
+                            score = score + 150
+                        end if
+                    end if
+
+                    j = j + 1
+                    match_found = .true.
+                    exit
+                else
+                    consecutive = 0
+                    j = j + 1
+                end if
+            end do
+
+            ! If character not found, no match
+            if (.not. match_found) then
+                score = -1
+                return
+            end if
+        end do
+
+        ! Penalty for length (prefer shorter matches)
+        score = score - (text_len - pat_len)
+    end function fuzzy_score
+
+    subroutine to_lowercase(str)
+        character(len=*), intent(inout) :: str
+        integer :: i, char_code
+
+        do i = 1, len_trim(str)
+            char_code = ichar(str(i:i))
+            if (char_code >= ichar('A') .and. char_code <= ichar('Z')) then
+                str(i:i) = achar(char_code + 32)
+            end if
+        end do
+    end subroutine to_lowercase
 
 end program fortress

@@ -1,7 +1,7 @@
 module ui_display
     use iso_fortran_env, only: output_unit
     use terminal_control, only: DIM, BOLD, RESET, UNDERLINE, &
-                                BLUE, GREEN, RED, GREY, WHITE, YELLOW
+                                BLUE, GREEN, RED, GREY, WHITE, YELLOW, CYAN, REVERSE
     use git_ops, only: write_git_indicators
     use filesystem_ops, only: MAX_PATH, MAX_FILES
     implicit none
@@ -15,14 +15,16 @@ contains
                               current_is_staged, current_is_unstaged, current_is_untracked, current_has_incoming, &
                               current_count, parent_files, parent_is_dir, parent_is_exec, parent_count, &
                               selected, parent_selected, scroll_offset, parent_scroll_offset, &
-                              in_git_repo, repo_name, branch_name, &
+                              in_git_repo, repo_name, branch_name, mode, &
                               move_mode, move_source_name, move_dest_selected, &
                               has_clipboard, clipboard_is_cut, clipboard_source_name, clipboard_count, &
                               is_selected, selection_count, &
-                              current_is_favorite, parent_is_favorite)
+                              current_is_favorite, parent_is_favorite, &
+                              search_buffer, search_length, &
+                              in_rename_mode, rename_buffer, rename_cursor_pos)
         integer, intent(in) :: r, c, top_padding, current_count, parent_count, selected, parent_selected
         integer, intent(in) :: scroll_offset, parent_scroll_offset
-        character(len=*), intent(in) :: current_dir, repo_name, branch_name
+        character(len=*), intent(in) :: current_dir, repo_name, branch_name, mode
         character(len=*), dimension(*), intent(in) :: current_files, parent_files
         logical, dimension(*), intent(in) :: current_is_dir, parent_is_dir
         logical, dimension(*), intent(in) :: current_is_exec, parent_is_exec
@@ -37,6 +39,11 @@ contains
         logical, dimension(*), intent(in) :: is_selected
         integer, intent(in) :: selection_count
         logical, dimension(*), intent(in) :: current_is_favorite, parent_is_favorite
+        character(len=*), intent(in) :: search_buffer
+        integer, intent(in) :: search_length
+        logical, intent(in) :: in_rename_mode
+        character(len=*), intent(in) :: rename_buffer
+        integer, intent(in) :: rename_cursor_pos
         integer :: left_w, i, parent_idx, current_idx, vis_h, display_len
         character(len=256) :: fname
         character(len=20) :: color_code
@@ -55,7 +62,9 @@ contains
         write(output_unit, '(a)') BOLD // "FORTRESS" // RESET // " - " // trim(current_dir)
 
         ! Header - Line 2: Status info (always present to prevent shifting)
-        if (move_mode) then
+        if (in_rename_mode) then
+            write(output_unit, '(a)') YELLOW // "RENAME MODE" // RESET
+        else if (move_mode) then
             write(output_unit, '(a)') RED // "MOVE: " // trim(move_source_name) // RESET
         else if (selection_count > 0) then
             ! Show selection count
@@ -76,6 +85,10 @@ contains
                     write(output_unit, '(a)') GREEN // "COPY: " // trim(clipboard_source_name) // RESET
                 end if
             end if
+        else if (in_git_repo .and. trim(mode) == 'git') then
+            ! Show git mode indicator
+            write(output_unit, '(a)') CYAN // trim(repo_name) // ":" // YELLOW // trim(branch_name) // " " // &
+                                     YELLOW // BOLD // "[ GIT MODE ]" // RESET
         else if (in_git_repo) then
             ! Show git repo info when no other status
             write(output_unit, '(a)') DIM // trim(repo_name) // ":" // trim(branch_name) // RESET
@@ -190,16 +203,57 @@ contains
                     end if
                     write(output_unit, '(a)') RESET
                 else if (current_idx == selected .and. .not. move_mode) then
-                    ! Normal selection cursor (not selected) - use bold+underline with original color
-                    write(output_unit, '(a)', advance='no') BOLD // UNDERLINE // trim(color_code) // trim(fname)
-                    ! Add git indicators if in repo
-                    if (in_git_repo) then
-                        call write_git_indicators(current_is_staged(current_idx), &
-                                                  current_is_unstaged(current_idx), &
-                                                  current_is_untracked(current_idx), &
-                                                  current_has_incoming(current_idx), .true.)
+                    ! Normal selection cursor (not in move mode)
+                    ! Check if in rename mode - show editable buffer with cursor
+                    if (in_rename_mode) then
+                        ! Show rename buffer with block cursor (█) at cursor position
+                        if (current_is_favorite(current_idx)) then
+                            write(output_unit, '(a)', advance='no') REVERSE // trim(color_code) // "★ "
+                        else
+                            write(output_unit, '(a)', advance='no') REVERSE // trim(color_code)
+                        end if
+
+                        if (rename_cursor_pos == len_trim(rename_buffer)) then
+                            ! Cursor at end
+                            write(output_unit, '(a)', advance='no') trim(rename_buffer) // '█'
+                        else if (rename_cursor_pos == 0) then
+                            ! Cursor at beginning
+                            write(output_unit, '(a)', advance='no') '█' // trim(rename_buffer)
+                        else
+                            ! Cursor in middle
+                            write(output_unit, '(a)', advance='no') rename_buffer(1:rename_cursor_pos) // '█' // &
+                                   rename_buffer(rename_cursor_pos+1:len_trim(rename_buffer))
+                        end if
+                        if (current_is_dir(current_idx) .and. current_files(current_idx) /= "." .and. &
+                            current_files(current_idx) /= "..") then
+                            write(output_unit, '(a)', advance='no') "/"
+                        end if
+                        write(output_unit, '(a)') RESET
+                    ! Not in rename mode - check if cut file selected
+                    else if (has_clipboard .and. clipboard_is_cut .and. clipboard_count == 1 .and. &
+                        trim(current_files(current_idx)) == trim(clipboard_source_name)) then
+                        ! If file is cut, show selected with red reverse
+                        write(output_unit, '(a)', advance='no') REVERSE // RED // trim(fname)
+                        ! Add git indicators if in repo
+                        if (in_git_repo) then
+                            call write_git_indicators(current_is_staged(current_idx), &
+                                                      current_is_unstaged(current_idx), &
+                                                      current_is_untracked(current_idx), &
+                                                      current_has_incoming(current_idx), .true.)
+                        end if
+                        write(output_unit, '(a)') RESET
+                    else
+                        ! Normal selection cursor - use bold+underline with original color
+                        write(output_unit, '(a)', advance='no') BOLD // UNDERLINE // trim(color_code) // trim(fname)
+                        ! Add git indicators if in repo
+                        if (in_git_repo) then
+                            call write_git_indicators(current_is_staged(current_idx), &
+                                                      current_is_unstaged(current_idx), &
+                                                      current_is_untracked(current_idx), &
+                                                      current_has_incoming(current_idx), .true.)
+                        end if
+                        write(output_unit, '(a)') RESET
                     end if
-                    write(output_unit, '(a)') RESET
                 else if (is_selected(current_idx)) then
                     ! Multi-selected item (not the cursor) - show with underline
                     write(output_unit, '(a)', advance='no') UNDERLINE // trim(color_code) // trim(fname)
@@ -230,15 +284,35 @@ contains
 
         ! Footer - help text only (status moved to header)
         ! Build footer text and truncate to prevent wrapping which causes screen scroll
-        if (move_mode) then
-            footer_text = DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root v:move here q:cancel" // RESET
+        if (in_rename_mode) then
+            footer_text = YELLOW // "RENAME MODE: " // RESET // &
+                         DIM // "Type to edit | Enter:confirm ESC:cancel" // RESET
+        else if (move_mode) then
+            footer_text = RED // "MOVE MODE: " // RESET // &
+                         DIM // "↑↓:next/prev dir →:enter dir ←:parent ~:home /:root alt-m:move here q:cancel" // RESET
         else if (selection_count > 0) then
-            footer_text = DIM // "Ctrl-D:deselect Space:toggle Shift+↑↓:block y:copy x:cut p:paste r:delete | " // RESET // &
-                         DIM // "→:enter ←:back ~:home /:root c:cd q:quit" // RESET
+            ! Selection mode footer - show multi-select help
+            footer_text = BLUE // "MULTI-SELECT: " // RESET // &
+                         DIM // "Space:toggle Shift+↑↓:block e:exit | alt-y:copy alt-x:cut alt-p:paste alt-r:delete | " // &
+                         "→:enter ←:back ~:home /:root alt-c:cd ctrl-q:quit" // RESET
+        else if (in_git_repo .and. trim(mode) == 'git') then
+            ! Git mode footer - show git operations
+            footer_text = YELLOW // trim(repo_name) // ":" // trim(branch_name) // " [ GIT MODE ]" // RESET // " | " // &
+                         YELLOW // "a:add u:unstage m:commit h:push l:pull f:fetch d:diff t:tag" // RESET // " | " // &
+                         DIM // "Space:select ↑↓:nav →:enter ←:back ~:home /:root 8:fav *:star " // &
+                         "alt-n:rename alt-v:view alt-m:move alt-y:copy alt-x:cut alt-p:paste alt-r:delete .:hidden " // &
+                         "alt-s:search alt-g:exit-mode alt-c:cd ctrl-q:quit" // RESET
         else if (in_git_repo) then
-            footer_text = DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden a:add u:unstage m:commit d:diff f:fetch l:pull h:push c:cd q:quit" // RESET
+            ! Normal mode in git repo - show alt-g to enter git mode
+            footer_text = DIM // trim(repo_name) // ":" // trim(branch_name) // " | " // &
+                         "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root " // &
+                         "8:fav *:star alt-n:rename alt-v:view alt-m:move alt-y:copy alt-x:cut alt-p:paste alt-r:delete " // &
+                         ".:hidden alt-s:search alt-g:git-mode alt-c:cd ctrl-q:quit" // RESET
         else
-            footer_text = DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root s:search 8:favorites *:star o:open n:rename r:remove v:move y:copy x:cut p:paste .:hidden c:cd q:quit" // RESET
+            ! Non-git repo footer
+            footer_text = DIM // "Space:select Shift+↑↓:block | ↑↓:nav →:enter ←:back ~:home /:root " // &
+                         "8:fav *:star alt-n:rename alt-v:view alt-m:move alt-y:copy alt-x:cut alt-p:paste alt-r:delete " // &
+                         ".:hidden alt-s:search alt-c:cd ctrl-q:quit" // RESET
         end if
 
         ! Truncate footer to terminal width - CRITICAL to prevent wrapping which causes screen scroll

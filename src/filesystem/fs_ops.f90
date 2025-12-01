@@ -320,56 +320,62 @@ contains
         call execute_command_line("stty -icanon -echo min 1 time 0 < /dev/tty", exitstat=stat)
     end subroutine open_file_in_default_app
 
-    subroutine rename_file_prompt(dir, current_name)
+    subroutine rename_file_prompt(dir, current_name, new_name, was_renamed)
         use iso_fortran_env, only: output_unit
-        use terminal_control, only: BOLD, RESET, CLEAR, GREEN, RED
+        use terminal_control, only: BOLD, RESET, YELLOW, ESC
         character(len=*), intent(in) :: dir, current_name
-        character(len=MAX_PATH) :: new_name
-        character(len=MAX_PATH*2) :: old_path, new_path, mv_cmd
+        character(len=*), intent(out) :: new_name
+        logical, intent(out) :: was_renamed
+        character(len=MAX_PATH) :: input_buffer
+        integer :: input_len
         character(len=1) :: key
-        integer :: stat, ios
+        integer :: ios
+        logical :: editing
 
-        ! Clear screen and show prompt
-        write(output_unit, '(a)', advance='no') CLEAR
-        write(output_unit, '(a)') BOLD // "Rename File" // RESET
-        write(output_unit, *)
-        write(output_unit, '(a)') "Current: " // trim(current_name)
-        write(output_unit, *)
-        write(output_unit, '(a)', advance='no') "New name: "
+        ! Initialize - pre-fill with current name
+        was_renamed = .false.
+        input_buffer = current_name
+        input_len = len_trim(current_name)
+        editing = .true.
 
-        ! Restore terminal to canonical mode for reading input
-        call execute_command_line("stty icanon echo 2>/dev/null")
+        do while (editing)
+            ! Move cursor to bottom of screen and show rename prompt
+            write(output_unit, '(a)', advance='no') ESC // "[999;1H"  ! Move to bottom left
+            write(output_unit, '(a)', advance='no') ESC // "[K"  ! Clear line
+            write(output_unit, '(a)', advance='no') YELLOW // BOLD // "Rename: " // RESET // &
+                                                     trim(input_buffer(1:input_len))
+            call flush(output_unit)
 
-        ! Read new filename
-        read(*, '(a)', iostat=ios) new_name
+            ! Read single character
+            read(*, '(a1)', advance='no', iostat=ios) key
+            if (ios /= 0) cycle
 
-        ! Restore raw mode
-        call execute_command_line("stty -icanon -echo min 1 time 0 2>/dev/null")
+            select case(ichar(key))
+            case(27)  ! ESC - cancel
+                editing = .false.
+                was_renamed = .false.
+            case(13, 10)  ! Enter - confirm
+                if (input_len > 0 .and. trim(input_buffer(1:input_len)) /= trim(current_name)) then
+                    new_name = input_buffer(1:input_len)
+                    was_renamed = .true.
+                end if
+                editing = .false.
+            case(127, 8)  ! Backspace
+                if (input_len > 0) then
+                    input_len = input_len - 1
+                end if
+            case(32:126)  ! Printable characters
+                if (input_len < MAX_PATH) then
+                    input_len = input_len + 1
+                    input_buffer(input_len:input_len) = key
+                end if
+            end select
+        end do
 
-        if (ios == 0 .and. len_trim(new_name) > 0) then
-            ! Build full paths
-            old_path = join_path(dir, current_name)
-            new_path = join_path(dir, new_name)
-
-            ! Execute rename using mv command
-            mv_cmd = "mv '" // trim(old_path) // "' '" // trim(new_path) // "' 2>&1"
-            call execute_command_line(trim(mv_cmd), exitstat=stat, wait=.true.)
-
-            ! Show result briefly
-            write(output_unit, *)
-            if (stat == 0) then
-                write(output_unit, '(a)') GREEN // "✓ Renamed successfully!" // RESET
-                write(output_unit, '(a)') "  " // trim(current_name) // " → " // trim(new_name)
-            else
-                write(output_unit, '(a)') RED // "✗ Rename failed" // RESET
-                write(output_unit, '(a)') "  (file may already exist or invalid name)"
-            end if
-            write(output_unit, *)
-            write(output_unit, '(a)') "Press any key to continue..."
-
-            ! Wait for keypress (ignore errors from Enter key)
-            read(*, '(a1)', iostat=ios) key
-        end if
+        ! Clear the prompt line
+        write(output_unit, '(a)', advance='no') ESC // "[999;1H"  ! Move to bottom
+        write(output_unit, '(a)', advance='no') ESC // "[K"  ! Clear line
+        call flush(output_unit)
     end subroutine rename_file_prompt
 
 end module filesystem_ops
