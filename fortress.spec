@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           fortress
-Version:        1.0.0
+Version:        1.0.1
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 

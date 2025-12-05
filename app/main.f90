@@ -4,6 +4,7 @@ program fortress
     use filesystem_ops
     use git_ops
     use ui_display
+    use version_info
     implicit none
 
     ! State variables
@@ -67,7 +68,23 @@ program fortress
     character(len=1) :: key
     integer :: i, rows, cols, visible_height, top_padding
     logical :: is_shift_pressed, is_alt_pressed
-    character(len=256) :: term_program
+    character(len=256) :: term_program, arg
+
+    ! Parse command-line arguments
+    if (command_argument_count() > 0) then
+        call get_command_argument(1, arg)
+        if (trim(arg) == '--help' .or. trim(arg) == '-h') then
+            call print_help()
+            stop
+        else if (trim(arg) == '--version' .or. trim(arg) == '-v') then
+            call print_version()
+            stop
+        else
+            print '(A)', 'Error: Unknown option: ' // trim(arg)
+            print '(A)', "Run 'fortress --help' for usage information"
+            stop 1
+        end if
+    end if
 
     ! Initialize
     current_dir = get_pwd()
