@@ -1,5 +1,7 @@
+%global debug_package %{nil}
+
 Name:           fortress
-Version:        0.9.99
+Version:        1.0.0
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -36,7 +38,7 @@ Features:
 %autosetup
 
 %build
-fpm build --flag "-O2"
+fpm build --flag "-O2 -ffree-line-length-none"
 
 %install
 mkdir -p %{buildroot}%{_bindir}
@@ -103,6 +105,10 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Fri Dec 05 2025 mfw <espadon@outlook.com> - 1.0.0-1
+- Fix top status bar not rendering on some terminals
+- Merge favorites: fuzzy jump, rename mode, git mode toggle, Alt-key bindings
+
 * Wed Oct 29 2025 mfw <espadon@outlook.com> - 0.9.99-1
 - Add conditional rows for WezTerm and Ghostty terminals
 - Fix alignment of pipes on favorited directories
