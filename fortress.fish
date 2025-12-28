@@ -3,42 +3,54 @@
 #   ~/.config/fish/functions/fortress.fish
 # or
 #   /usr/share/fish/vendor_functions.d/fortress.fish (system-wide)
+#
+# This provides the cd-on-exit feature. Without this function,
+# you can still run fortress but 'c' won't change your shell's directory.
 
 function fortress --description "Navigate filesystem with FORTRESS and cd on exit"
-    # Set fortress directory - prefer system install, fallback to FORTRESS_DIR env var
-    set -l fortress_dir
     set -l fortress_exe
 
-    # Check for fortress-bin in PATH first (works for all package managers including Homebrew)
-    if command -v fortress-bin &> /dev/null
+    # Check standard install locations (lib path first, then legacy bin path)
+    if test -x /usr/lib/fortress/fortress
+        set fortress_exe /usr/lib/fortress/fortress
+    else if test -x /usr/lib64/fortress/fortress
+        set fortress_exe /usr/lib64/fortress/fortress
+    else if command -v fortress-bin &> /dev/null
+        # Legacy: fortress-bin in PATH (Homebrew, older packages)
         set fortress_exe fortress-bin
-    else if test -x /usr/bin/fortress-bin
-        # Use system-installed binary (RPM/AUR)
-        set fortress_exe /usr/bin/fortress-bin
+    else if set -q FORTRESS_BIN
+        # Allow override via environment variable
+        set fortress_exe $FORTRESS_BIN
     else if set -q FORTRESS_DIR
-        set fortress_dir $FORTRESS_DIR
-        set fortress_exe $fortress_dir/build/gfortran_*/app/fortress
+        # Development: FORTRESS_DIR points to repo root
+        set fortress_exe $FORTRESS_DIR/build/gfortran_*/app/fortress
     else
-        # Fallback to local development path
-        set fortress_dir $HOME/Documents/GithubOrgs/FortranGoingOnForty/fortress
-        set fortress_exe $fortress_dir/build/gfortran_*/app/fortress
+        # Fallback: look for any fortress executable (NixOS, custom installs)
+        set -l found (type -P fortress 2>/dev/null)
+        if test -n "$found" -a -x "$found"
+            set fortress_exe $found
+        else
+            echo "fortress: binary not found. Set FORTRESS_BIN or FORTRESS_DIR." >&2
+            return 1
+        end
     end
 
     # Run fortress
-    if test -n "$fortress_exe"
-        eval $fortress_exe
-    else
-        $fortress_dir/build/gfortran_*/app/fortress
-    end
+    eval $fortress_exe $argv
+    set -l exit_code $status
 
     # Check if fortress wants us to cd somewhere
     if test -f $HOME/.fortress_cd
         set -l target_dir (cat $HOME/.fortress_cd)
         rm -f $HOME/.fortress_cd
-        if cd $target_dir 2>/dev/null
-            echo "fortress: changed directory to "(pwd)
-        else
-            echo "fortress: failed to change directory to $target_dir" >&2
+        if test -n "$target_dir" -a -d "$target_dir"
+            if cd $target_dir 2>/dev/null
+                echo "fortress: changed directory to "(pwd)
+            else
+                echo "fortress: failed to change directory to $target_dir" >&2
+            end
         end
     end
+
+    return $exit_code
 end

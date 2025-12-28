@@ -1,6 +1,6 @@
 # Maintainer: Matthew Wolffe <mfwolffe@outlook.com>
 pkgname=fortress
-pkgver=0.9.99
+pkgver=1.0.2
 pkgrel=1
 pkgdesc="A command-line file explorer written in modern Fortran with cd-on-exit"
 arch=('x86_64' 'aarch64')
@@ -20,10 +20,13 @@ build() {
 package() {
     cd "$srcdir/$pkgname-$pkgver"
 
-    # Install the binary
-    install -Dm755 "build/gfortran_"*"/app/fortress" "$pkgdir/usr/bin/fortress-bin"
+    # Install the binary to lib (not directly in PATH)
+    install -Dm755 "build/gfortran_"*"/app/fortress" "$pkgdir/usr/lib/fortress/fortress"
 
-    # Install shell integration files
+    # Install wrapper script to /usr/bin/fortress
+    install -Dm755 "fortress-wrapper.sh" "$pkgdir/usr/bin/fortress"
+
+    # Install shell integration files (for cd-on-exit when sourced)
     install -Dm644 "fortress.sh" "$pkgdir/usr/share/fortress/fortress.sh"
     install -Dm644 "fortress.fish" "$pkgdir/usr/share/fortress/fortress.fish"
 

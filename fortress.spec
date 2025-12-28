@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           fortress
-Version:        1.0.1
+Version:        1.0.2
 Release:        1%{?dist}
 Summary:        A command-line file explorer written in modern Fortran with cd-on-exit
 
@@ -42,13 +42,17 @@ fpm build --flag "-O2 -ffree-line-length-none"
 
 %install
 mkdir -p %{buildroot}%{_bindir}
+mkdir -p %{buildroot}%{_libdir}/%{name}
 mkdir -p %{buildroot}%{_datadir}/%{name}
 mkdir -p %{buildroot}%{_datadir}/fish/vendor_functions.d
 mkdir -p %{buildroot}%{_sysconfdir}/profile.d
 mkdir -p %{buildroot}%{_docdir}/%{name}
 
-# Install the binary
-install -Dm755 build/gfortran_*/app/fortress %{buildroot}%{_bindir}/fortress-bin
+# Install the binary to lib (not directly in PATH)
+install -Dm755 build/gfortran_*/app/fortress %{buildroot}%{_libdir}/%{name}/fortress
+
+# Install wrapper script to bin
+install -Dm755 fortress-wrapper.sh %{buildroot}%{_bindir}/fortress
 
 # Install shell integration files to shared location
 install -Dm644 fortress.sh %{buildroot}%{_datadir}/%{name}/fortress.sh
@@ -69,7 +73,8 @@ fi
 %files
 %license LICENSE
 %doc README.md
-%{_bindir}/fortress-bin
+%{_bindir}/fortress
+%{_libdir}/%{name}/fortress
 %{_datadir}/%{name}/fortress.sh
 %{_datadir}/%{name}/fortress.fish
 %config(noreplace) %{_sysconfdir}/profile.d/fortress.sh
@@ -105,6 +110,12 @@ cat <<'EOF'
 EOF
 
 %changelog
+* Sat Dec 28 2025 mfw <mfwolffe@outlook.com> - 1.0.2-1
+- Move binary to /usr/lib/fortress/, add wrapper script to /usr/bin/fortress
+- Eliminate fortress-bin naming, both script and binary now named fortress
+- Add NixOS flake.nix support
+- Improve shell integration scripts with better path detection
+
 * Fri Dec 05 2025 mfw <espadon@outlook.com> - 1.0.0-1
 - Fix top status bar not rendering on some terminals
 - Merge favorites: fuzzy jump, rename mode, git mode toggle, Alt-key bindings
